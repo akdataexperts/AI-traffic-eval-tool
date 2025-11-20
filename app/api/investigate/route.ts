@@ -27,6 +27,23 @@ export async function POST(request: NextRequest) {
     const openAIClient = getOpenAIClient();
     const geminiClient = getGeminiClient();
 
+    const defaultPrompt = `Go online to {domainName} and investigate what they do.
+
+Based on your research, provide:
+1. what are problems solved by {domainName} & what are the solutions offered by {domainName} 
+
+Make sure you mention key aspects of the offering and the relevant industry and how it differs from others
+
+more keywords for more specific answers
+
+final list should be a list 5 best combination of 2 to 5 keywords.
+
+Example format:
+
+data security challenges | enterprise encryption solutions | performance bottlenecks | cloud infrastructure services| budget overruns | budget management software
+
+Important: Output ONLY the keywords separated by |, nothing else.`;
+
     // Use custom prompt if provided, otherwise use default
     // Replace placeholders in custom prompt
     let processedCustomPrompt = custom_prompt;
@@ -34,199 +51,47 @@ export async function POST(request: NextRequest) {
       processedCustomPrompt = processedCustomPrompt.replace(/\{domainName\}/g, domainName);
       processedCustomPrompt = processedCustomPrompt.replace(/\{baseDomain\}/g, baseDomain);
     }
+    
+    // Replace placeholders in default prompt
+    const defaultPromptWithReplacements = defaultPrompt.replace(/\{domainName\}/g, domainName).replace(/\{baseDomain\}/g, baseDomain);
 
-    const defaultPrompt = `Go online to ${domainName} and investigate what they do.
-
-Based on your research, provide:
-1. what are problems solved by ${domainName} & what are the solutions offered by ${domainName} 
-
-give 3 answers with from 2 to 4 keywords 
-
-more keywords for more specific answers
-2. The primary client persona of the website and whether the business is B2B, B2C, or B2B + B2C
-
-Format your response as follows:
-
-Line 1: Problem 1 keywords (2-4 keywords, comma-separated) | Solution 1 keywords (2-4 keywords, comma-separated)
-Line 2: Problem 2 keywords (2-4 keywords, comma-separated) | Solution 2 keywords (2-4 keywords, comma-separated)
-Line 3: Problem 3 keywords (2-4 keywords, comma-separated) | Solution 3 keywords (2-4 keywords, comma-separated)
-Line 4: persona | description | B2B/B2C/B2B + B2C
-
-Example format:
-data security challenges, compliance risks | enterprise encryption solutions, compliance management tools
-scalability issues, performance bottlenecks | cloud infrastructure services, auto-scaling platforms
-cost optimization, budget overruns | budget management software, resource allocation systems
-persona | IT decision-makers at mid-sized tech companies | B2B
-
-Important: Output ONLY the specified lines, nothing else.`;
-
-    const prompt = processedCustomPrompt || defaultPrompt;
+    const prompt = processedCustomPrompt || defaultPromptWithReplacements;
 
     // Helper function to parse model response
     const parseModelResponse = (content: string, modelName: string) => {
       console.log(`[${new Date().toISOString()}] ${modelName} raw response:`, content.substring(0, 500));
       
-      const lines = content.split('\n').map((line) => line.trim()).filter((line) => line);
-      console.log(`[${new Date().toISOString()}] ${modelName} returned ${lines.length} lines`);
-
-      const problemsAndSolutions: Array<{
-        problem: string;
-        solution: string;
-        problem_keywords: string[];
-        solution_keywords: string[];
-        index: number;
-      }> = [];
-      let personaInfo: string | null = null;
-      let businessType = 'Unknown';
-
-      // Parse problems and solutions (lines 1-3, 3 pairs)
-      // Look for lines with "|" separator, skip lines that start with "Line X:" label
-      let problemSolutionLineIndex = 0;
-      for (let i = 0; i < lines.length && problemSolutionLineIndex < 3; i++) {
-        let line = lines[i];
-        
-        // Remove "Line 1:", "Line 2:", "Line 3:" prefixes if present
-        line = line.replace(/^Line\s*\d+\s*:\s*/i, '').trim();
-        
-        if (!line.includes('|')) {
-          continue;
-        }
-
-        const parts = line.split('|').map((p) => p.trim());
-        if (parts.length >= 2) {
-          let problemText = parts[0];
-          let solutionText = parts[1];
-          
-          // Remove any remaining "Line X" labels that might be in the text
-          problemText = problemText.replace(/^Line\s*\d+\s*/i, '').trim();
-          solutionText = solutionText.replace(/^Line\s*\d+\s*/i, '').trim();
-          
-          // Parse keywords (comma-separated, 2-4 keywords)
-          const problemKeywords = problemText.split(',').map(k => k.trim()).filter(k => k && !k.match(/^Line\s*\d+$/i));
-          const solutionKeywords = solutionText.split(',').map(k => k.trim()).filter(k => k && !k.match(/^Line\s*\d+$/i));
-
-          if (problemKeywords.length > 0 && solutionKeywords.length > 0) {
-            problemsAndSolutions.push({
-              problem: problemText,
-              solution: solutionText,
-              problem_keywords: problemKeywords,
-              solution_keywords: solutionKeywords,
-              index: problemSolutionLineIndex + 1,
-            });
-            problemSolutionLineIndex++;
-          }
-        }
-      }
-
-      // Extract all keywords from problems and solutions
       const keywords: Array<{
         keyword: string;
         phrasing_index?: number;
         is_main?: boolean;
       }> = [];
+
+      // Parse keywords separated by | - can be on single line or multiple lines
+      // Join all lines first, then split by |
+      const allText = content.trim();
       
-      problemsAndSolutions.forEach((ps, idx) => {
-        // Add problem keywords
-        ps.problem_keywords.forEach((kw, kwIdx) => {
+      // Split by | and clean up each keyword
+      const keywordParts = allText
+        .split('|')
+        .map(k => k.trim())
+        .filter(k => k && k.length > 0);
+      
+      // Extract keywords from the response
+      keywordParts.forEach((keyword, index) => {
+        // Clean up any extra whitespace or newlines
+        const cleanKeyword = keyword.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleanKeyword) {
           keywords.push({
-            keyword: kw,
-            phrasing_index: idx * 2 + 1,
-            is_main: idx === 0 && kwIdx === 0,
+            keyword: cleanKeyword,
+            phrasing_index: index + 1,
+            is_main: index === 0,
           });
-        });
-        // Add solution keywords
-        ps.solution_keywords.forEach((kw, kwIdx) => {
-          keywords.push({
-            keyword: kw,
-            phrasing_index: idx * 2 + 2,
-            is_main: false,
-          });
-        });
+        }
       });
 
-      // Parse persona (line 4 or any line containing "persona")
-      // Look for persona line more flexibly
-      for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-        
-        // Remove "Line 4:" or "Line X:" prefix if present
-        line = line.replace(/^Line\s*\d+\s*:\s*/i, '').trim();
-        
-        // Check if line contains "persona" (case-insensitive)
-        if (line.toLowerCase().includes('persona') || line.toLowerCase().startsWith('persona')) {
-          const parts = line.split('|').map((p) => p.trim());
-          
-          // Try to find persona info in different formats
-          if (parts.length >= 3) {
-            personaInfo = parts[1];
-            businessType = parts[2];
-          } else if (parts.length >= 2) {
-            // If only 2 parts, second might be persona description
-            personaInfo = parts[1];
-            // Try to extract business type from persona description
-            const personaLower = personaInfo.toLowerCase();
-            if (personaLower.includes('b2b + b2c') || personaLower.includes('b2b+b2c')) {
-              businessType = 'B2B + B2C';
-            } else if (personaLower.includes('b2b') && !personaLower.includes('b2c')) {
-              businessType = 'B2B';
-            } else if (personaLower.includes('b2c') && !personaLower.includes('b2b')) {
-              businessType = 'B2C';
-            } else {
-              businessType = 'Unknown';
-            }
-          } else if (parts.length === 1 && line.toLowerCase().includes('persona')) {
-            // If only one part, try to extract from the whole line
-            const lineLower = line.toLowerCase();
-            if (lineLower.includes('b2b + b2c') || lineLower.includes('b2b+b2c')) {
-              businessType = 'B2B + B2C';
-              personaInfo = line.replace(/persona\s*:?\s*/i, '').replace(/\s*\|\s*b2b.*$/i, '').trim();
-            } else if (lineLower.includes('b2b')) {
-              businessType = 'B2B';
-              personaInfo = line.replace(/persona\s*:?\s*/i, '').replace(/\s*\|\s*b2b.*$/i, '').trim();
-            } else if (lineLower.includes('b2c')) {
-              businessType = 'B2C';
-              personaInfo = line.replace(/persona\s*:?\s*/i, '').replace(/\s*\|\s*b2c.*$/i, '').trim();
-            }
-          }
-          
-          if (personaInfo) {
-            break;
-          }
-        }
-        
-        // Also check for business type patterns in any line
-        if (!personaInfo && !businessType) {
-          const lineLower = line.toLowerCase();
-          if (lineLower.includes('b2b + b2c') || lineLower.includes('b2b+b2c')) {
-            businessType = 'B2B + B2C';
-            if (line.includes('|')) {
-              const parts = line.split('|').map((p) => p.trim());
-              if (parts.length >= 2) {
-                personaInfo = parts[1] || parts[0];
-              }
-            }
-          } else if (lineLower.includes('b2b') && !lineLower.includes('b2c')) {
-            businessType = 'B2B';
-            if (line.includes('|')) {
-              const parts = line.split('|').map((p) => p.trim());
-              if (parts.length >= 2) {
-                personaInfo = parts[1] || parts[0];
-              }
-            }
-          } else if (lineLower.includes('b2c') && !lineLower.includes('b2b')) {
-            businessType = 'B2C';
-            if (line.includes('|')) {
-              const parts = line.split('|').map((p) => p.trim());
-              if (parts.length >= 2) {
-                personaInfo = parts[1] || parts[0];
-              }
-            }
-          }
-        }
-      }
-
-      // Fallback if parsing failed
-      if (problemsAndSolutions.length === 0 && keywords.length === 0) {
+      // Fallback if no keywords found
+      if (keywords.length === 0) {
         keywords.push({
           keyword: `main offering ${domainName}`,
           phrasing_index: 1,
@@ -234,15 +99,11 @@ Important: Output ONLY the specified lines, nothing else.`;
         });
       }
 
-      if (!personaInfo) {
-        personaInfo = 'General audience';
-      }
-
       return {
         keywords,
-        problems_and_solutions: problemsAndSolutions,
-        persona: personaInfo,
-        business_type: businessType,
+        problems_and_solutions: [],
+        persona: 'General audience',
+        business_type: 'Unknown',
       };
     };
 

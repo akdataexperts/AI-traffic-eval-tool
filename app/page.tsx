@@ -95,25 +95,17 @@ export default function Home() {
 Based on your research, provide:
 1. what are problems solved by {domainName} & what are the solutions offered by {domainName} 
 
-give 3 answers with from 2 to 4 keywords 
+Make sure you mention key aspects of the offering and the relevant industry and how it differs from others
 
 more keywords for more specific answers
-2. The primary client persona of the website and whether the business is B2B, B2C, or B2B + B2C
 
-Format your response as follows:
-
-Line 1: Problem 1 keywords (2-4 keywords, comma-separated) | Solution 1 keywords (2-4 keywords, comma-separated)
-Line 2: Problem 2 keywords (2-4 keywords, comma-separated) | Solution 2 keywords (2-4 keywords, comma-separated)
-Line 3: Problem 3 keywords (2-4 keywords, comma-separated) | Solution 3 keywords (2-4 keywords, comma-separated)
-Line 4: persona | description | B2B/B2C/B2B + B2C
+final list should be a list 5 best combination of 2 to 5 keywords.
 
 Example format:
-data security challenges, compliance risks | enterprise encryption solutions, compliance management tools
-scalability issues, performance bottlenecks | cloud infrastructure services, auto-scaling platforms
-cost optimization, budget overruns | budget management software, resource allocation systems
-persona | IT decision-makers at mid-sized tech companies | B2B
 
-Important: Output ONLY the specified lines, nothing else.`);
+data security challenges | enterprise encryption solutions | performance bottlenecks | cloud infrastructure services| budget overruns | budget management software
+
+Important: Output ONLY the keywords separated by |, nothing else.`);
   const [customPromptTemplate, setCustomPromptTemplate] = useState(`You are a marketing strategist analyzing search intent and user behavior.
 
 Website Context:
