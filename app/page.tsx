@@ -98,6 +98,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRawResponses, setExpandedRawResponses] = useState<{ [key: string]: boolean }>({});
+  const [expandedWebsiteResults, setExpandedWebsiteResults] = useState<{ [key: string]: boolean }>({});
+  const [activeLLMTab, setActiveLLMTab] = useState<{ [key: string]: string }>({});
+  const [expandedSimilarityKeywords, setExpandedSimilarityKeywords] = useState<{ [key: string]: boolean }>({});
   const [investigationPrompt, setInvestigationPrompt] = useState(`Go online to {domainName} and investigate what they do.
 
 Based on your research, provide:
@@ -582,12 +585,40 @@ Important: Output ONLY your selections in the format above, nothing else.`);
               // Show entry if it has investigation results OR similarity results
               if (!entry.investigationResults && !entry.similarityResults) return null;
               const investigationResults = entry.investigationResults;
+              const isExpanded = expandedWebsiteResults[entry.id] || false;
+              // Get active tab or default to first available model
+              const getDefaultTab = () => {
+                if (investigationResults?.perplexity) return 'perplexity';
+                if (investigationResults?.gpt) return 'gpt';
+                if (investigationResults?.gemini) return 'gemini';
+                return '';
+              };
+              const activeTab = activeLLMTab[entry.id] || getDefaultTab();
               
               return (
                 <div key={entry.id} className="bg-white rounded-lg shadow-lg p-6">
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                    Results for: {entry.url || 'Unknown URL'}
-                  </h2>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-2xl font-semibold text-gray-900">
+                      Results for: {entry.url || 'Unknown URL'}
+                    </h2>
+                    <button
+                      onClick={() => setExpandedWebsiteResults(prev => ({ ...prev, [entry.id]: !prev[entry.id] }))}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      <svg
+                        className={`w-5 h-5 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                      {isExpanded ? 'Collapse' : 'Expand'} Results
+                    </button>
+                  </div>
+
+                  {isExpanded && (
+                    <>
 
                   {/* Investigation Results */}
                   {investigationResults && (
@@ -598,25 +629,46 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                       <div className="mb-6 border-b border-gray-200">
                         <div className="flex gap-4">
                           {investigationResults.perplexity && (
-                            <button className="px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-semibold">
+                            <button
+                              onClick={() => setActiveLLMTab(prev => ({ ...prev, [entry.id]: 'perplexity' }))}
+                              className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                activeTab === 'perplexity'
+                                  ? 'border-blue-600 text-blue-600'
+                                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                              }`}
+                            >
                               {investigationResults.perplexity.model_name || 'Perplexity Sonar'}
                             </button>
                           )}
                           {investigationResults.gpt && (
-                            <button className="px-4 py-2 border-b-2 border-green-600 text-green-600 font-semibold">
+                            <button
+                              onClick={() => setActiveLLMTab(prev => ({ ...prev, [entry.id]: 'gpt' }))}
+                              className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                activeTab === 'gpt'
+                                  ? 'border-green-600 text-green-600'
+                                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                              }`}
+                            >
                               {investigationResults.gpt.model_name || 'GPT'}
                             </button>
                           )}
                           {investigationResults.gemini && (
-                            <button className="px-4 py-2 border-b-2 border-purple-600 text-purple-600 font-semibold">
+                            <button
+                              onClick={() => setActiveLLMTab(prev => ({ ...prev, [entry.id]: 'gemini' }))}
+                              className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                activeTab === 'gemini'
+                                  ? 'border-purple-600 text-purple-600'
+                                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                              }`}
+                            >
                               {investigationResults.gemini.model_name || 'Gemini'}
                             </button>
                           )}
                         </div>
                       </div>
 
-                      {/* Display results for each model */}
-                      {investigationResults.perplexity && !investigationResults.perplexity.error && (
+                      {/* Display results for active model only */}
+                      {activeTab === 'perplexity' && investigationResults.perplexity && !investigationResults.perplexity.error && (
                         <div className="mb-8 p-4 border border-blue-200 rounded-lg bg-blue-50/30">
                 <h3 className="text-xl font-semibold text-blue-900 mb-4">{investigationResults.perplexity.model_name || 'Perplexity Sonar'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
@@ -665,9 +717,190 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     )}
                   </div>
                 )}
+                
+                {/* Keywords from Excel Files */}
+                {entry.keywords.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {entry.keywords.map((keywordData, index) => (
+                          <div
+                            key={index}
+                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                  {keywordData.fileName}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-purple-200">
+                        <p className="text-sm text-gray-600">
+                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Similarity Results for Perplexity */}
+                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'perplexity') && (() => {
+                  const modelResult = entry.similarityResults!.find(sr => sr.model === 'perplexity')!;
+                  const totalScore = modelResult.total_score ?? 0;
+                  const scorePercentage = (totalScore * 100).toFixed(2);
+                  const scoreColor =
+                    totalScore > 0.7
+                      ? 'text-green-700 bg-green-50 border-green-200'
+                      : totalScore > 0.5
+                      ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                      : 'text-gray-700 bg-gray-50 border-gray-200';
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-sm text-gray-600 font-medium">Total Similarity Score:</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                            {scorePercentage}%
+                          </span>
+                          <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                totalScore > 0.7
+                                  ? 'bg-green-500'
+                                  : totalScore > 0.5
+                                  ? 'bg-yellow-500'
+                                  : 'bg-gray-400'
+                              }`}
+                              style={{ width: `${Math.min(totalScore * 100, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        {modelResult.results.map((result, keywordIndex) => {
+                          const keywordKey = `${entry.id}-perplexity-${keywordIndex}`;
+                          const isKeywordExpanded = expandedSimilarityKeywords[keywordKey] || false;
+                          
+                          return (
+                            <div
+                              key={keywordIndex}
+                              className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden"
+                            >
+                              <button
+                                onClick={() => setExpandedSimilarityKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 px-6 py-4 hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-semibold text-sm">
+                                    {keywordIndex + 1}
+                                  </div>
+                                  <div className="flex-1 text-left">
+                                    <h4 className="text-lg font-semibold text-gray-900">{result.keyword}</h4>
+                                    <p className="text-xs text-gray-500 mt-0.5">{result.fileName}</p>
+                                  </div>
+                                  <svg
+                                    className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-180' : ''}`}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </button>
+                              {isKeywordExpanded && (
+                                <div className="p-6">
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                      <thead>
+                                        <tr className="border-b border-gray-200">
+                                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Model Keyword</th>
+                                          <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Similarity Score</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {result.similarities.map((similarity, simIndex) => {
+                                          const score = similarity.similarity_score;
+                                          const scorePercentage = (score * 100).toFixed(2);
+                                          const scoreColor =
+                                            score > 0.7
+                                              ? 'text-green-700 bg-green-50 border-green-200'
+                                              : score > 0.5
+                                              ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                                              : 'text-gray-700 bg-gray-50 border-gray-200';
+                                          const isMatched = similarity.is_matched ?? false;
+                                          
+                                          return (
+                                            <tr
+                                              key={simIndex}
+                                              className={`border-b border-gray-100 hover:bg-gray-50 ${
+                                                isMatched 
+                                                  ? 'bg-blue-100 border-l-4 border-blue-500' 
+                                                  : similarity.is_main 
+                                                  ? 'bg-emerald-50/30' 
+                                                  : ''
+                                              }`}
+                                            >
+                                              <td className="py-3 px-4">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-medium text-gray-900">
+                                                    {similarity.perplexity_keyword}
+                                                  </span>
+                                                  {isMatched && (
+                                                    <span className="px-2 py-0.5 text-xs font-bold text-blue-700 bg-blue-200 rounded-full">
+                                                      MATCHED
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                              <td className="py-3 px-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                  <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                                                    {scorePercentage}%
+                                                  </span>
+                                                  <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                    <div
+                                                      className={`h-full ${
+                                                        score > 0.7
+                                                          ? 'bg-green-500'
+                                                          : score > 0.5
+                                                          ? 'bg-yellow-500'
+                                                          : 'bg-gray-400'
+                                                      }`}
+                                                      style={{ width: `${Math.min(score * 100, 100)}%` }}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-            )}
-            {investigationResults.gpt && !investigationResults.gpt.error && (
+                      )}
+                      {activeTab === 'gpt' && investigationResults.gpt && !investigationResults.gpt.error && (
               <div className="mb-8 p-4 border border-green-200 rounded-lg bg-green-50/30">
                 <h3 className="text-xl font-semibold text-green-900 mb-4">{investigationResults.gpt.model_name || 'GPT'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
@@ -716,9 +949,190 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     )}
                   </div>
                 )}
+                
+                {/* Keywords from Excel Files */}
+                {entry.keywords.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {entry.keywords.map((keywordData, index) => (
+                          <div
+                            key={index}
+                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                  {keywordData.fileName}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-purple-200">
+                        <p className="text-sm text-gray-600">
+                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Similarity Results for GPT */}
+                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gpt') && (() => {
+                  const modelResult = entry.similarityResults!.find(sr => sr.model === 'gpt')!;
+                  const totalScore = modelResult.total_score ?? 0;
+                  const scorePercentage = (totalScore * 100).toFixed(2);
+                  const scoreColor =
+                    totalScore > 0.7
+                      ? 'text-green-700 bg-green-50 border-green-200'
+                      : totalScore > 0.5
+                      ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                      : 'text-gray-700 bg-gray-50 border-gray-200';
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-sm text-gray-600 font-medium">Total Similarity Score:</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                            {scorePercentage}%
+                          </span>
+                          <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                totalScore > 0.7
+                                  ? 'bg-green-500'
+                                  : totalScore > 0.5
+                                  ? 'bg-yellow-500'
+                                  : 'bg-gray-400'
+                              }`}
+                              style={{ width: `${Math.min(totalScore * 100, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        {modelResult.results.map((result, keywordIndex) => {
+                          const keywordKey = `${entry.id}-gpt-${keywordIndex}`;
+                          const isKeywordExpanded = expandedSimilarityKeywords[keywordKey] || false;
+                          
+                          return (
+                            <div
+                              key={keywordIndex}
+                              className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden"
+                            >
+                              <button
+                                onClick={() => setExpandedSimilarityKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 px-6 py-4 hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-semibold text-sm">
+                                    {keywordIndex + 1}
+                                  </div>
+                                  <div className="flex-1 text-left">
+                                    <h4 className="text-lg font-semibold text-gray-900">{result.keyword}</h4>
+                                    <p className="text-xs text-gray-500 mt-0.5">{result.fileName}</p>
+                                  </div>
+                                  <svg
+                                    className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-180' : ''}`}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </button>
+                              {isKeywordExpanded && (
+                                <div className="p-6">
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                      <thead>
+                                        <tr className="border-b border-gray-200">
+                                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Model Keyword</th>
+                                          <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Similarity Score</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {result.similarities.map((similarity, simIndex) => {
+                                          const score = similarity.similarity_score;
+                                          const scorePercentage = (score * 100).toFixed(2);
+                                          const scoreColor =
+                                            score > 0.7
+                                              ? 'text-green-700 bg-green-50 border-green-200'
+                                              : score > 0.5
+                                              ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                                              : 'text-gray-700 bg-gray-50 border-gray-200';
+                                          const isMatched = similarity.is_matched ?? false;
+                                          
+                                          return (
+                                            <tr
+                                              key={simIndex}
+                                              className={`border-b border-gray-100 hover:bg-gray-50 ${
+                                                isMatched 
+                                                  ? 'bg-blue-100 border-l-4 border-blue-500' 
+                                                  : similarity.is_main 
+                                                  ? 'bg-emerald-50/30' 
+                                                  : ''
+                                              }`}
+                                            >
+                                              <td className="py-3 px-4">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-medium text-gray-900">
+                                                    {similarity.perplexity_keyword}
+                                                  </span>
+                                                  {isMatched && (
+                                                    <span className="px-2 py-0.5 text-xs font-bold text-blue-700 bg-blue-200 rounded-full">
+                                                      MATCHED
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                              <td className="py-3 px-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                  <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                                                    {scorePercentage}%
+                                                  </span>
+                                                  <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                    <div
+                                                      className={`h-full ${
+                                                        score > 0.7
+                                                          ? 'bg-green-500'
+                                                          : score > 0.5
+                                                          ? 'bg-yellow-500'
+                                                          : 'bg-gray-400'
+                                                      }`}
+                                                      style={{ width: `${Math.min(score * 100, 100)}%` }}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-            )}
-            {investigationResults.gemini && !investigationResults.gemini.error && (
+                      )}
+                      {activeTab === 'gemini' && investigationResults.gemini && !investigationResults.gemini.error && (
               <div className="mb-8 p-4 border border-purple-200 rounded-lg bg-purple-50/30">
                 <h3 className="text-xl font-semibold text-purple-900 mb-4">{investigationResults.gemini.model_name || 'Gemini'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
@@ -767,11 +1181,192 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     )}
                   </div>
                 )}
+                
+                {/* Keywords from Excel Files */}
+                {entry.keywords.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {entry.keywords.map((keywordData, index) => (
+                          <div
+                            key={index}
+                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                {index + 1}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                  {keywordData.fileName}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-purple-200">
+                        <p className="text-sm text-gray-600">
+                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Similarity Results for Gemini */}
+                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gemini') && (() => {
+                  const modelResult = entry.similarityResults!.find(sr => sr.model === 'gemini')!;
+                  const totalScore = modelResult.total_score ?? 0;
+                  const scorePercentage = (totalScore * 100).toFixed(2);
+                  const scoreColor =
+                    totalScore > 0.7
+                      ? 'text-green-700 bg-green-50 border-green-200'
+                      : totalScore > 0.5
+                      ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                      : 'text-gray-700 bg-gray-50 border-gray-200';
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <h4 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores</h4>
+                      <div className="flex items-center justify-between mb-4">
+                        <span className="text-sm text-gray-600 font-medium">Total Similarity Score:</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                            {scorePercentage}%
+                          </span>
+                          <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                totalScore > 0.7
+                                  ? 'bg-green-500'
+                                  : totalScore > 0.5
+                                  ? 'bg-yellow-500'
+                                  : 'bg-gray-400'
+                              }`}
+                              style={{ width: `${Math.min(totalScore * 100, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        {modelResult.results.map((result, keywordIndex) => {
+                          const keywordKey = `${entry.id}-gemini-${keywordIndex}`;
+                          const isKeywordExpanded = expandedSimilarityKeywords[keywordKey] || false;
+                          
+                          return (
+                            <div
+                              key={keywordIndex}
+                              className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden"
+                            >
+                              <button
+                                onClick={() => setExpandedSimilarityKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 px-6 py-4 hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-semibold text-sm">
+                                    {keywordIndex + 1}
+                                  </div>
+                                  <div className="flex-1 text-left">
+                                    <h4 className="text-lg font-semibold text-gray-900">{result.keyword}</h4>
+                                    <p className="text-xs text-gray-500 mt-0.5">{result.fileName}</p>
+                                  </div>
+                                  <svg
+                                    className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-180' : ''}`}
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                  >
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </button>
+                              {isKeywordExpanded && (
+                                <div className="p-6">
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full">
+                                      <thead>
+                                        <tr className="border-b border-gray-200">
+                                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Model Keyword</th>
+                                          <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Similarity Score</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {result.similarities.map((similarity, simIndex) => {
+                                          const score = similarity.similarity_score;
+                                          const scorePercentage = (score * 100).toFixed(2);
+                                          const scoreColor =
+                                            score > 0.7
+                                              ? 'text-green-700 bg-green-50 border-green-200'
+                                              : score > 0.5
+                                              ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                                              : 'text-gray-700 bg-gray-50 border-gray-200';
+                                          const isMatched = similarity.is_matched ?? false;
+                                          
+                                          return (
+                                            <tr
+                                              key={simIndex}
+                                              className={`border-b border-gray-100 hover:bg-gray-50 ${
+                                                isMatched 
+                                                  ? 'bg-blue-100 border-l-4 border-blue-500' 
+                                                  : similarity.is_main 
+                                                  ? 'bg-emerald-50/30' 
+                                                  : ''
+                                              }`}
+                                            >
+                                              <td className="py-3 px-4">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="font-medium text-gray-900">
+                                                    {similarity.perplexity_keyword}
+                                                  </span>
+                                                  {isMatched && (
+                                                    <span className="px-2 py-0.5 text-xs font-bold text-blue-700 bg-blue-200 rounded-full">
+                                                      MATCHED
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </td>
+                                              <td className="py-3 px-4 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                  <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                                                    {scorePercentage}%
+                                                  </span>
+                                                  <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                    <div
+                                                      className={`h-full ${
+                                                        score > 0.7
+                                                          ? 'bg-green-500'
+                                                          : score > 0.5
+                                                          ? 'bg-yellow-500'
+                                                          : 'bg-gray-400'
+                                                      }`}
+                                                      style={{ width: `${Math.min(score * 100, 100)}%` }}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
-            )}
+                      )}
             
-            {/* Error messages for failed models */}
-            {investigationResults.perplexity?.error && (
+                      {/* Error messages for failed models */}
+                      {activeTab === 'perplexity' && investigationResults.perplexity?.error && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-red-700 mb-2">{investigationResults.perplexity.model_name || 'Perplexity Sonar'} Error: {investigationResults.perplexity.error}</p>
                 {investigationResults.perplexity.raw_response && (
@@ -801,7 +1396,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                         )}
                       </div>
                       )}
-                      {investigationResults.gpt?.error && (
+                      {activeTab === 'gpt' && investigationResults.gpt?.error && (
                         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-red-700 mb-2">{investigationResults.gpt.model_name || 'GPT'} Error: {investigationResults.gpt.error}</p>
                 {investigationResults.gpt.raw_response && (
@@ -831,7 +1426,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                         )}
                       </div>
                       )}
-                      {investigationResults.gemini?.error && (
+                      {activeTab === 'gemini' && investigationResults.gemini?.error && (
                         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                           <p className="text-red-700 mb-2">{investigationResults.gemini.model_name || 'Gemini'} Error: {investigationResults.gemini.error}</p>
                           {investigationResults.gemini.raw_response && (
@@ -864,196 +1459,8 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     </div>
                   )}
 
-                  {/* Keywords from Excel Files */}
-                  {entry.keywords.length > 0 && (
-                    <div className="mb-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h3>
-                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {entry.keywords.map((keywordData, index) => (
-                      <div
-                        key={index}
-                        className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
-                      >
-                        <div className="flex items-start gap-2">
-                          <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
-                            {index + 1}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
-                            <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
-                              {keywordData.fileName}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                        <div className="mt-3 pt-3 border-t border-purple-200">
-                          <p className="text-sm text-gray-600">
-                            Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* Similarity Results for All Models */}
-                  {entry.similarityResults && entry.similarityResults.length > 0 && (
-                    <div className="mb-6">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores (All Models)</h3>
-                      {entry.similarityResults.map((modelResult, modelIndex) => {
-                        const totalScore = modelResult.total_score ?? 0;
-                        const scorePercentage = (totalScore * 100).toFixed(2);
-                        const scoreColor =
-                          totalScore > 0.7
-                            ? 'text-green-700 bg-green-50 border-green-200'
-                            : totalScore > 0.5
-                            ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
-                            : 'text-gray-700 bg-gray-50 border-gray-200';
-                        
-                        return (
-                          <div key={modelIndex} className="mb-6">
-                            <div className="flex items-center justify-between mb-3">
-                              <h4 className="text-md font-semibold text-gray-800">
-                                {investigationResults && 
-                                  (modelResult.model === 'perplexity' 
-                                    ? investigationResults.perplexity?.model_name || 'Perplexity Sonar'
-                                    : modelResult.model === 'gpt'
-                                    ? investigationResults.gpt?.model_name || 'GPT'
-                                    : investigationResults.gemini?.model_name || 'Gemini')
-                                }
-                              </h4>
-                              <div className="flex items-center gap-3">
-                                <span className="text-sm text-gray-600 font-medium">Total Similarity Score:</span>
-                                <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
-                                  {scorePercentage}%
-                                </span>
-                                <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                  <div
-                                    className={`h-full ${
-                                      totalScore > 0.7
-                                        ? 'bg-green-500'
-                                        : totalScore > 0.5
-                                        ? 'bg-yellow-500'
-                                        : 'bg-gray-400'
-                                    }`}
-                                    style={{ width: `${Math.min(totalScore * 100, 100)}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="space-y-4">
-                      {modelResult.results.map((result, keywordIndex) => (
-                        <div
-                          key={keywordIndex}
-                          className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden"
-                        >
-                          {/* Keyword Header */}
-                          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-gray-200 px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="flex-shrink-0 w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center font-semibold text-sm">
-                                {keywordIndex + 1}
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="text-lg font-semibold text-gray-900">{result.keyword}</h4>
-                                <p className="text-xs text-gray-500 mt-0.5">{result.fileName}</p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Similarity Scores Table */}
-                          <div className="p-6">
-                            <div className="overflow-x-auto">
-                              <table className="w-full">
-                                <thead>
-                                  <tr className="border-b border-gray-200">
-                                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Model Keyword</th>
-                                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Similarity Score</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {result.similarities.map((similarity, simIndex) => {
-                                    const score = similarity.similarity_score;
-                                    const scorePercentage = (score * 100).toFixed(2);
-                                    // Color coding: high (>0.7), medium (0.5-0.7), low (<0.5)
-                                    const scoreColor =
-                                      score > 0.7
-                                        ? 'text-green-700 bg-green-50 border-green-200'
-                                        : score > 0.5
-                                        ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
-                                        : 'text-gray-700 bg-gray-50 border-gray-200';
-
-                                    const isMatched = similarity.is_matched ?? false;
-                                    
-                                    return (
-                                      <tr
-                                        key={simIndex}
-                                        className={`border-b border-gray-100 hover:bg-gray-50 ${
-                                          isMatched 
-                                            ? 'bg-blue-100 border-l-4 border-blue-500' 
-                                            : similarity.is_main 
-                                            ? 'bg-emerald-50/30' 
-                                            : ''
-                                        }`}
-                                      >
-                                        <td className="py-3 px-4">
-                                          <div className="flex items-center gap-2">
-                                            <span className="font-medium text-gray-900">
-                                              {similarity.perplexity_keyword}
-                                            </span>
-                                            {isMatched && (
-                                              <span className="px-2 py-0.5 text-xs font-bold text-blue-700 bg-blue-200 rounded-full">
-                                                MATCHED
-                                              </span>
-                                            )}
-                                            {similarity.is_main && (
-                                              <span className="px-2 py-0.5 text-xs font-bold text-emerald-700 bg-emerald-100 rounded-full">
-                                                MAIN
-                                              </span>
-                                            )}
-                                            {similarity.phrasing_index && (
-                                              <span className="text-xs text-gray-500">
-                                                (Phrasing {similarity.phrasing_index})
-                                              </span>
-                                            )}
-                                          </div>
-                                        </td>
-                                        <td className="py-3 px-4 text-center">
-                                          <div className="flex items-center justify-center gap-2">
-                                            <span
-                                              className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}
-                                            >
-                                              {scorePercentage}%
-                                            </span>
-                                            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                              <div
-                                                className={`h-full ${
-                                                  score > 0.7
-                                                    ? 'bg-green-500'
-                                                    : score > 0.5
-                                                    ? 'bg-yellow-500'
-                                                    : 'bg-gray-400'
-                                                }`}
-                                                style={{ width: `${Math.min(score * 100, 100)}%` }}
-                                              />
-                                            </div>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                            ))}
-                          </div>
-                        </div>
-                        );
-                      })}
-                    </div>
+                    </>
                   )}
                 </div>
               );
