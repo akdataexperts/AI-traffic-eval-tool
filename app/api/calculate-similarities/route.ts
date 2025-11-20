@@ -80,8 +80,63 @@ export async function POST(request: NextRequest) {
       console.log(`[${new Date().toISOString()}] Generated embedding for Perplexity keyword: ${perplexityKeyword.keyword}`);
     }
 
-    // Calculate similarity scores
-    console.log(`[${new Date().toISOString()}] Calculating similarity scores...`);
+    // Calculate similarity scores and create one-to-one matching
+    console.log(`[${new Date().toISOString()}] Calculating similarity scores and creating one-to-one matches...`);
+    
+    // First, calculate all similarity scores
+    interface SimilarityPair {
+      excelIndex: number;
+      perplexityIndex: number;
+      score: number;
+    }
+
+    const allPairs: SimilarityPair[] = [];
+
+    for (let excelIdx = 0; excelIdx < excelKeywordEmbeddings.length; excelIdx++) {
+      const excelKeywordData = excelKeywordEmbeddings[excelIdx];
+      if (!excelKeywordData.embedding) {
+        console.warn(`[${new Date().toISOString()}] Skipping Excel keyword "${excelKeywordData.keyword}" - no embedding generated`);
+        continue;
+      }
+
+      const excelEmbedding = excelKeywordData.embedding;
+
+      for (let perplexityIdx = 0; perplexityIdx < perplexityKeywordEmbeddings.length; perplexityIdx++) {
+        const perplexityKeywordData = perplexityKeywordEmbeddings[perplexityIdx];
+        if (!perplexityKeywordData.embedding) {
+          continue;
+        }
+
+        const score = cosineSimilarity(excelEmbedding, perplexityKeywordData.embedding);
+        allPairs.push({
+          excelIndex: excelIdx,
+          perplexityIndex: perplexityIdx,
+          score,
+        });
+      }
+    }
+
+    // Sort pairs by score (descending) to prioritize best matches
+    allPairs.sort((a, b) => b.score - a.score);
+
+    // Create one-to-one matching using greedy algorithm
+    const matchedExcelIndices = new Set<number>();
+    const matchedPerplexityIndices = new Set<number>();
+    const matches = new Map<number, { perplexityIndex: number; score: number }>(); // excelIndex -> {perplexityIndex, score}
+
+    for (const pair of allPairs) {
+      // If both Excel and Perplexity keywords are unmatched, create a match
+      if (!matchedExcelIndices.has(pair.excelIndex) && !matchedPerplexityIndices.has(pair.perplexityIndex)) {
+        matchedExcelIndices.add(pair.excelIndex);
+        matchedPerplexityIndices.add(pair.perplexityIndex);
+        matches.set(pair.excelIndex, {
+          perplexityIndex: pair.perplexityIndex,
+          score: pair.score,
+        });
+      }
+    }
+
+    // Build similarity results with all LLM keywords, marking the matched one
     const similarityResults: Array<{
       keyword: string;
       fileName: string;
@@ -90,38 +145,36 @@ export async function POST(request: NextRequest) {
         phrasing_index?: number;
         is_main?: boolean;
         similarity_score: number;
+        is_matched?: boolean;
       }>;
     }> = [];
 
-    for (const excelKeywordData of excelKeywordEmbeddings) {
-      if (!excelKeywordData.embedding) {
-        console.warn(`[${new Date().toISOString()}] Skipping Excel keyword "${excelKeywordData.keyword}" - no embedding generated`);
-        continue;
-      }
+    const matchedScores: number[] = [];
 
-      // Store embedding in a const to help TypeScript with type narrowing
+    for (let excelIdx = 0; excelIdx < excelKeywordEmbeddings.length; excelIdx++) {
+      const excelKeywordData = excelKeywordEmbeddings[excelIdx];
+      const match = matches.get(excelIdx);
+
+      // Calculate all similarities for this Excel keyword
       const excelEmbedding = excelKeywordData.embedding;
+      const similarities = perplexityKeywordEmbeddings
+        .map((perplexityKeywordData, perplexityIdx) => {
+          if (!perplexityKeywordData.embedding || !excelEmbedding) {
+            return null;
+          }
 
-      const similarities = perplexityKeywordEmbeddings.map((perplexityKeywordData) => {
-        if (!perplexityKeywordData.embedding) {
+          const score = cosineSimilarity(excelEmbedding, perplexityKeywordData.embedding);
           return {
             perplexity_keyword: perplexityKeywordData.keyword,
             phrasing_index: perplexityKeywordData.phrasing_index,
             is_main: perplexityKeywordData.is_main,
-            similarity_score: 0,
+            similarity_score: score,
+            is_matched: match?.perplexityIndex === perplexityIdx,
           };
-        }
+        })
+        .filter((s): s is NonNullable<typeof s> => s !== null);
 
-        const score = cosineSimilarity(excelEmbedding, perplexityKeywordData.embedding);
-        return {
-          perplexity_keyword: perplexityKeywordData.keyword,
-          phrasing_index: perplexityKeywordData.phrasing_index,
-          is_main: perplexityKeywordData.is_main,
-          similarity_score: score,
-        };
-      });
-
-      // Sort similarities by score (descending)
+      // Sort by score descending
       similarities.sort((a, b) => b.similarity_score - a.similarity_score);
 
       similarityResults.push({
@@ -129,13 +182,25 @@ export async function POST(request: NextRequest) {
         fileName: excelKeywordData.fileName,
         similarities,
       });
+
+      if (match) {
+        matchedScores.push(match.score);
+      } else {
+        matchedScores.push(0);
+      }
     }
 
-    console.log(`[${new Date().toISOString()}] Similarity calculation complete`);
+    // Calculate total similarity score (average of all matched scores)
+    const totalSimilarityScore = matchedScores.length > 0
+      ? matchedScores.reduce((sum, score) => sum + score, 0) / matchedScores.length
+      : 0;
+
+    console.log(`[${new Date().toISOString()}] Similarity calculation complete. Total score: ${totalSimilarityScore.toFixed(4)}`);
 
     return NextResponse.json({
       success: true,
       results: similarityResults,
+      total_score: totalSimilarityScore,
     });
   } catch (error: any) {
     console.error(`[${new Date().toISOString()}] Error calculating similarities:`, error);

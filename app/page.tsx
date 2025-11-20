@@ -70,25 +70,33 @@ interface SimilarityResult {
     phrasing_index?: number;
     is_main?: boolean;
     similarity_score: number;
+    is_matched?: boolean;
   }>;
 }
 
 interface ModelSimilarityResults {
   model: string;
   results: SimilarityResult[];
+  total_score?: number;
+}
+
+interface WebsiteEntry {
+  id: string;
+  url: string;
+  excelFiles: File[];
+  keywords: KeywordData[];
+  investigationResults: InvestigationResults | null;
+  similarityResults: ModelSimilarityResults[] | null;
+  isProcessing: boolean;
+  error: string | null;
 }
 
 export default function Home() {
-  const [websiteUrl, setWebsiteUrl] = useState('');
-  const [investigationData, setInvestigationData] = useState<InvestigationData | null>(null);
-  const [investigationResults, setInvestigationResults] = useState<InvestigationResults | null>(null);
-  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [websiteEntries, setWebsiteEntries] = useState<WebsiteEntry[]>([
+    { id: '1', url: '', excelFiles: [], keywords: [], investigationResults: null, similarityResults: null, isProcessing: false, error: null }
+  ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keywords, setKeywords] = useState<KeywordData[]>([]);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [similarityResults, setSimilarityResults] = useState<ModelSimilarityResults[] | null>(null);
-  const [calculatingSimilarities, setCalculatingSimilarities] = useState(false);
   const [expandedRawResponses, setExpandedRawResponses] = useState<{ [key: string]: boolean }>({});
   const [investigationPrompt, setInvestigationPrompt] = useState(`Go online to {domainName} and investigate what they do.
 
@@ -145,93 +153,39 @@ NONE
 
 Important: Output ONLY your selections in the format above, nothing else.`);
 
-  const handleInvestigate = async () => {
-    if (!websiteUrl.trim()) {
-      setError('Please enter a website URL');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setInvestigationData(null);
-    setInvestigationResults(null);
-    setPreviewData(null);
-    setSimilarityResults(null);
-
-    try {
-      const response = await fetch('/api/investigate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-          website_url: websiteUrl,
-          custom_prompt: investigationPrompt || undefined,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Investigation failed');
-      }
-
-      const data: InvestigationResults = await response.json();
-      setInvestigationResults(data);
-      
-      // For backward compatibility, use Perplexity data as primary investigationData
-      if (data.perplexity && !data.perplexity.error) {
-        setInvestigationData(data.perplexity);
-      } else if (data.gpt && !data.gpt.error) {
-        setInvestigationData(data.gpt);
-      } else if (data.gemini && !data.gemini.error) {
-        setInvestigationData(data.gemini);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to investigate website');
-    } finally {
-      setLoading(false);
-    }
+  // Helper functions for managing website entries
+  const addWebsiteEntry = () => {
+    const newId = Date.now().toString();
+    setWebsiteEntries([...websiteEntries, {
+      id: newId,
+      url: '',
+      excelFiles: [],
+      keywords: [],
+      investigationResults: null,
+      similarityResults: null,
+      isProcessing: false,
+      error: null,
+    }]);
   };
 
-  const handleGeneratePrompts = async () => {
-    if (!investigationData) {
-      setError('Please investigate a website first');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setPreviewData(null);
-
-    try {
-      const response = await fetch('/api/generate-prompts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          investigation_data: investigationData,
-          custom_prompt_template: customPromptTemplate,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Prompt generation failed');
-      }
-
-      const data = await response.json();
-      setPreviewData(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate prompts');
-    } finally {
-      setLoading(false);
-    }
+  const removeWebsiteEntry = (id: string) => {
+    setWebsiteEntries(websiteEntries.filter(entry => entry.id !== id));
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const updateWebsiteEntry = (id: string, updates: Partial<WebsiteEntry>) => {
+    setWebsiteEntries(prevEntries => 
+      prevEntries.map(entry =>
+        entry.id === id ? { ...entry, ...updates } : entry
+      )
+    );
+  };
+
+  const handleFileSelectForEntry = async (entryId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
-    setSelectedFiles(fileArray);
-    setError(null);
+    updateWebsiteEntry(entryId, { excelFiles: fileArray, error: null });
 
     const extractedKeywords: KeywordData[] = [];
 
@@ -240,7 +194,6 @@ Important: Output ONLY your selections in the format above, nothing else.`);
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         
-        // Look for sheet named "keyword" (case-insensitive)
         const keywordSheet = workbook.SheetNames.find(
           name => name.toLowerCase() === 'keyword'
         );
@@ -251,8 +204,6 @@ Important: Output ONLY your selections in the format above, nothing else.`);
         }
 
         const worksheet = workbook.Sheets[keywordSheet];
-        
-        // Get cell A2 (row 2, column 1)
         const cellA2 = worksheet['A2'];
         
         if (!cellA2) {
@@ -267,35 +218,84 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             keyword,
             fileName: file.name,
           });
-        } else {
-          console.warn(`Keyword in A2 is empty in ${file.name}`);
         }
       } catch (err: any) {
         console.error(`Error processing file ${file.name}:`, err);
-        setError(`Error processing ${file.name}: ${err.message}`);
+        updateWebsiteEntry(entryId, { error: `Error processing ${file.name}: ${err.message}` });
       }
     }
 
-    setKeywords(extractedKeywords);
-    // Reset similarity results when keywords change
-    setSimilarityResults(null);
+    updateWebsiteEntry(entryId, { keywords: extractedKeywords, similarityResults: null, excelFiles: fileArray });
   };
 
-  const handleCalculateSimilarities = async () => {
-    if (!investigationResults || !keywords.length) {
-      setError('Please investigate a website and select Excel files with keywords first');
+  const handleInvestigateAll = async () => {
+    const validEntries = websiteEntries.filter(entry => entry.url.trim());
+    if (validEntries.length === 0) {
+      setError('Please enter at least one website URL');
       return;
     }
 
-    setCalculatingSimilarities(true);
     setError(null);
+    setLoading(true);
 
-    try {
-      // Calculate similarities for all three models
-      const similarityPromises: Array<Promise<{ model: string; results: SimilarityResult[] }>> = [];
+    // Process all websites in parallel
+    const investigationPromises = validEntries.map(async (entry) => {
+      updateWebsiteEntry(entry.id, { isProcessing: true, error: null });
+      
+      try {
+        const response = await fetch('/api/investigate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            website_url: entry.url,
+            custom_prompt: investigationPrompt || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Investigation failed');
+        }
+
+        const data: InvestigationResults = await response.json();
+        updateWebsiteEntry(entry.id, { 
+          investigationResults: data,
+          isProcessing: false,
+        });
+      } catch (err: any) {
+        updateWebsiteEntry(entry.id, { 
+          error: err.message || 'Failed to investigate website',
+          isProcessing: false,
+        });
+      }
+    });
+
+    await Promise.all(investigationPromises);
+    setLoading(false);
+  };
+
+  const handleCalculateSimilaritiesForAll = async () => {
+    const entriesWithData = websiteEntries.filter(
+      entry => entry.investigationResults && entry.keywords.length > 0
+    );
+
+    if (entriesWithData.length === 0) {
+      setError('Please investigate websites and select Excel files first');
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+
+    // Process all entries in parallel
+    const similarityPromises = entriesWithData.map(async (entry) => {
+      const investigationResults = entry.investigationResults!;
+      const keywords = entry.keywords;
+
+      const modelPromises: Array<Promise<{ model: string; results: SimilarityResult[]; total_score?: number }>> = [];
 
       if (investigationResults.perplexity && !investigationResults.perplexity.error) {
-        similarityPromises.push(
+        modelPromises.push(
           fetch('/api/calculate-similarities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -305,12 +305,12 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             }),
           })
             .then(res => res.json())
-            .then(data => ({ model: 'perplexity', results: data.results }))
+            .then(data => ({ model: 'perplexity', results: data.results, total_score: data.total_score }))
         );
       }
 
       if (investigationResults.gpt && !investigationResults.gpt.error) {
-        similarityPromises.push(
+        modelPromises.push(
           fetch('/api/calculate-similarities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -320,12 +320,12 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             }),
           })
             .then(res => res.json())
-            .then(data => ({ model: 'gpt', results: data.results }))
+            .then(data => ({ model: 'gpt', results: data.results, total_score: data.total_score }))
         );
       }
 
       if (investigationResults.gemini && !investigationResults.gemini.error) {
-        similarityPromises.push(
+        modelPromises.push(
           fetch('/api/calculate-similarities', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -335,20 +335,24 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             }),
           })
             .then(res => res.json())
-            .then(data => ({ model: 'gemini', results: data.results }))
+            .then(data => ({ model: 'gemini', results: data.results, total_score: data.total_score }))
         );
       }
 
-      const allResults = await Promise.all(similarityPromises);
-      
-      // Store results with model information
-      setSimilarityResults(allResults as any);
-    } catch (err: any) {
-      setError(err.message || 'Failed to calculate similarities');
-    } finally {
-      setCalculatingSimilarities(false);
-    }
+      try {
+        const allResults = await Promise.all(modelPromises);
+        updateWebsiteEntry(entry.id, { similarityResults: allResults });
+      } catch (err: any) {
+        updateWebsiteEntry(entry.id, { error: err.message || 'Failed to calculate similarities' });
+      }
+    });
+
+    await Promise.all(similarityPromises);
+    setLoading(false);
   };
+
+  // Note: handleGeneratePrompts removed - functionality can be re-added per website entry if needed
+
 
 
   return (
@@ -356,83 +360,137 @@ Important: Output ONLY your selections in the format above, nothing else.`);
       <div className="max-w-7xl mx-auto">
         <h1 className="text-4xl font-bold text-gray-900 mb-8">AI Traffic Eval Tool</h1>
 
-        {/* Input Section */}
+        {/* Investigation Prompt Editor */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <div className="mb-4">
-            <label htmlFor="website-url" className="block text-sm font-medium text-gray-700 mb-2">
-              Website URL
-            </label>
+          <label htmlFor="investigation-prompt" className="block text-sm font-medium text-gray-700 mb-2">
+            Investigation Prompt (Editable)
+          </label>
+          <textarea
+            id="investigation-prompt"
+            value={investigationPrompt}
+            onChange={(e) => setInvestigationPrompt(e.target.value)}
+            rows={8}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm text-gray-900"
+            placeholder="Leave empty to use default prompt. Use {domainName} and {baseDomain} as placeholders."
+            disabled={loading}
+          />
+          <p className="text-xs text-gray-500 mt-2">
+            Leave empty to use the default prompt. The prompt will be sent to all models (Perplexity, GPT, and Gemini) for website investigation.
+            Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
+          </p>
+        </div>
+
+        {/* Website Entries Section */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Website Entries</h2>
             <div className="flex gap-2">
-              <input
-                id="website-url"
-                type="text"
-                value={websiteUrl}
-                onChange={(e) => setWebsiteUrl(e.target.value)}
-                placeholder="https://example.com"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                disabled={loading}
-              />
               <button
-                onClick={handleInvestigate}
-                disabled={loading}
+                onClick={handleInvestigateAll}
+                disabled={loading || websiteEntries.filter(e => e.url.trim()).length === 0}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Investigate
+                {loading ? 'Processing...' : 'Investigate All'}
+              </button>
+              <button
+                onClick={handleCalculateSimilaritiesForAll}
+                disabled={loading || websiteEntries.filter(e => e.investigationResults && e.keywords.length > 0).length === 0}
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Calculate Similarities All
+              </button>
+              <button
+                onClick={addWebsiteEntry}
+                disabled={loading}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                + Add Website
               </button>
             </div>
           </div>
 
-          {/* Investigation Prompt Editor */}
-          <div className="mt-4">
-            <label htmlFor="investigation-prompt" className="block text-sm font-medium text-gray-700 mb-2">
-              Investigation Prompt (Editable)
-            </label>
-            <textarea
-              id="investigation-prompt"
-              value={investigationPrompt}
-              onChange={(e) => setInvestigationPrompt(e.target.value)}
-              rows={8}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm text-gray-900"
-              placeholder="Leave empty to use default prompt. Use {domainName} and {baseDomain} as placeholders."
-              disabled={loading}
-            />
-            <p className="text-xs text-gray-500 mt-2">
-              Leave empty to use the default prompt. The prompt will be sent to all models (Perplexity, GPT, and Gemini) for website investigation.
-              Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
-            </p>
-          </div>
-          
-          {/* Excel File Selection */}
-          <div className="mt-4">
-            <label htmlFor="excel-files" className="block text-sm font-medium text-gray-700 mb-2">
-              Select Excel Files (Keyword Sheets)
-            </label>
-            <div className="flex gap-2 items-center">
-              <input
-                id="excel-files"
-                type="file"
-                accept=".xlsx,.xls"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <label
-                htmlFor="excel-files"
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-block"
-              >
-                Select Excel Files
-              </label>
-              {selectedFiles.length > 0 && (
-                <span className="text-sm text-gray-600">
-                  {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} selected
-                </span>
-              )}
-            </div>
-            {keywords.length > 0 && (
-              <p className="text-sm text-green-600 mt-2">
-                ✓ Extracted {keywords.length} keyword{keywords.length !== 1 ? 's' : ''} from {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''}
-              </p>
-            )}
+          <div className="space-y-4">
+            {websiteEntries.map((entry, index) => (
+              <div key={entry.id} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-semibold text-sm">
+                    {index + 1}
+                  </div>
+                  <div className="flex-1 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Website URL
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={entry.url}
+                          onChange={(e) => updateWebsiteEntry(entry.id, { url: e.target.value })}
+                          placeholder="https://example.com"
+                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                          disabled={loading || entry.isProcessing}
+                        />
+                        {websiteEntries.length > 1 && (
+                          <button
+                            onClick={() => removeWebsiteEntry(entry.id)}
+                            disabled={loading || entry.isProcessing}
+                            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Excel Files (Keyword Sheets)
+                      </label>
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          multiple
+                          onChange={(e) => handleFileSelectForEntry(entry.id, e)}
+                          className="hidden"
+                          id={`excel-files-${entry.id}`}
+                          disabled={loading || entry.isProcessing}
+                        />
+                        <label
+                          htmlFor={`excel-files-${entry.id}`}
+                          className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-block"
+                        >
+                          Select Excel Files
+                        </label>
+                        {entry.excelFiles.length > 0 && (
+                          <span className="text-sm text-gray-600">
+                            {entry.excelFiles.length} file{entry.excelFiles.length !== 1 ? 's' : ''} selected
+                          </span>
+                        )}
+                      </div>
+                      {entry.keywords.length > 0 && (
+                        <p className="text-sm text-green-600 mt-2">
+                          ✓ Extracted {entry.keywords.length} keyword{entry.keywords.length !== 1 ? 's' : ''} from {entry.excelFiles.length} file{entry.excelFiles.length !== 1 ? 's' : ''}
+                        </p>
+                      )}
+                    </div>
+
+                    {entry.error && (
+                      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded-lg text-sm">
+                        {entry.error}
+                      </div>
+                    )}
+
+                    {entry.isProcessing && (
+                      <div className="flex items-center gap-2 text-blue-600">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        <span className="text-sm">Processing...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -443,35 +501,123 @@ Important: Output ONLY your selections in the format above, nothing else.`);
           </div>
         )}
 
-        {/* Investigation Results */}
-        {investigationResults && (
+        {/* Similarity Summary Table - At the Top */}
+        {websiteEntries.filter(e => e.similarityResults && e.similarityResults.length > 0).length > 0 && (
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Website Analysis - All Models</h2>
-            
-            {/* Model Results Tabs */}
-            <div className="mb-6 border-b border-gray-200">
-              <div className="flex gap-4">
-                {investigationResults.perplexity && (
-                  <button className="px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-semibold">
-                    {investigationResults.perplexity.model_name || 'Perplexity Sonar'}
-                  </button>
-                )}
-                {investigationResults.gpt && (
-                  <button className="px-4 py-2 border-b-2 border-green-600 text-green-600 font-semibold">
-                    {investigationResults.gpt.model_name || 'GPT'}
-                  </button>
-                )}
-                {investigationResults.gemini && (
-                  <button className="px-4 py-2 border-b-2 border-purple-600 text-purple-600 font-semibold">
-                    {investigationResults.gemini.model_name || 'Gemini'}
-                  </button>
-                )}
-              </div>
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Similarity Summary</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gradient-to-r from-indigo-50 to-purple-50 border-b-2 border-indigo-200">
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Website</th>
+                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Model</th>
+                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Total Score</th>
+                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Keywords Matched</th>
+                    <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Total Keywords</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {websiteEntries
+                    .filter(e => e.similarityResults && e.similarityResults.length > 0)
+                    .map((entry) => {
+                      const investigationResults = entry.investigationResults;
+                      return entry.similarityResults!.map((modelResult, idx) => {
+                        const totalScore = modelResult.total_score ?? 0;
+                        const scorePercentage = (totalScore * 100).toFixed(2);
+                        const scoreColor =
+                          totalScore > 0.7
+                            ? 'text-green-700 bg-green-50 border-green-200'
+                            : totalScore > 0.5
+                            ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                            : 'text-gray-700 bg-gray-50 border-gray-200';
+                        
+                        // Count matched keywords (Excel keywords that have at least one matched LLM keyword)
+                        const matchedCount = modelResult.results.filter(result => 
+                          result.similarities.some(s => s.is_matched)
+                        ).length;
+                        
+                        const modelName = investigationResults && 
+                          (modelResult.model === 'perplexity' 
+                            ? investigationResults.perplexity?.model_name || 'Perplexity Sonar'
+                            : modelResult.model === 'gpt'
+                            ? investigationResults.gpt?.model_name || 'GPT'
+                            : investigationResults.gemini?.model_name || 'Gemini');
+                        
+                        return (
+                          <tr key={`${entry.id}-${idx}`} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-3 px-4">
+                              <div className="text-sm font-medium text-gray-900 truncate max-w-xs" title={entry.url}>
+                                {entry.url || 'Unknown URL'}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="text-sm font-medium text-gray-900">{modelName}</span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                                {scorePercentage}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="text-sm font-medium text-gray-900">{matchedCount}</span>
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className="text-sm font-medium text-gray-900">{entry.keywords.length}</span>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })
+                    .flat()}
+                </tbody>
+              </table>
             </div>
+          </div>
+        )}
 
-            {/* Display results for each model */}
-            {investigationResults.perplexity && !investigationResults.perplexity.error && (
-              <div className="mb-8 p-4 border border-blue-200 rounded-lg bg-blue-50/30">
+        {/* Results for Each Website Entry */}
+        {websiteEntries.filter(e => e.investigationResults || e.similarityResults).length > 0 && (
+          <div className="space-y-6">
+            {websiteEntries.map((entry) => {
+              // Show entry if it has investigation results OR similarity results
+              if (!entry.investigationResults && !entry.similarityResults) return null;
+              const investigationResults = entry.investigationResults;
+              
+              return (
+                <div key={entry.id} className="bg-white rounded-lg shadow-lg p-6">
+                  <h2 className="text-2xl font-semibold text-gray-900 mb-4">
+                    Results for: {entry.url || 'Unknown URL'}
+                  </h2>
+
+                  {/* Investigation Results */}
+                  {investigationResults && (
+                    <div className="mb-6">
+                      <h3 className="text-xl font-semibold text-gray-900 mb-4">Website Analysis - All Models</h3>
+            
+                      {/* Model Results Tabs */}
+                      <div className="mb-6 border-b border-gray-200">
+                        <div className="flex gap-4">
+                          {investigationResults.perplexity && (
+                            <button className="px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-semibold">
+                              {investigationResults.perplexity.model_name || 'Perplexity Sonar'}
+                            </button>
+                          )}
+                          {investigationResults.gpt && (
+                            <button className="px-4 py-2 border-b-2 border-green-600 text-green-600 font-semibold">
+                              {investigationResults.gpt.model_name || 'GPT'}
+                            </button>
+                          )}
+                          {investigationResults.gemini && (
+                            <button className="px-4 py-2 border-b-2 border-purple-600 text-purple-600 font-semibold">
+                              {investigationResults.gemini.model_name || 'Gemini'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Display results for each model */}
+                      {investigationResults.perplexity && !investigationResults.perplexity.error && (
+                        <div className="mb-8 p-4 border border-blue-200 rounded-lg bg-blue-50/30">
                 <h3 className="text-xl font-semibold text-blue-900 mb-4">{investigationResults.perplexity.model_name || 'Perplexity Sonar'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
@@ -652,11 +798,11 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            )}
-            {investigationResults.gpt?.error && (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                        )}
+                      </div>
+                      )}
+                      {investigationResults.gpt?.error && (
+                        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
                 <p className="text-red-700 mb-2">{investigationResults.gpt.model_name || 'GPT'} Error: {investigationResults.gpt.error}</p>
                 {investigationResults.gpt.raw_response && (
                   <div>
@@ -682,58 +828,49 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            )}
-            {investigationResults.gemini?.error && (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-700 mb-2">{investigationResults.gemini.model_name || 'Gemini'} Error: {investigationResults.gemini.error}</p>
-                {investigationResults.gemini.raw_response && (
-                  <div>
-                    <button
-                      onClick={() => setExpandedRawResponses(prev => ({ ...prev, gemini: !prev.gemini }))}
-                      className="flex items-center gap-2 text-sm font-medium text-red-700 hover:text-red-900 mb-2"
-                    >
-                      <svg
-                        className={`w-4 h-4 transition-transform ${expandedRawResponses.gemini ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                      {expandedRawResponses.gemini ? 'Hide' : 'Show'} Raw Response
-                    </button>
-                    {expandedRawResponses.gemini && (
-                      <div className="p-4 bg-gray-900 rounded-lg overflow-auto max-h-96">
-                        <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap">
-                          {investigationResults.gemini.raw_response}
-                        </pre>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Keywords from Excel Files */}
-            {keywords.length > 0 && (
-              <div className="mb-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-900">Keywords from Excel Files</h3>
-                  {investigationResults && (
-                    <button
-                      onClick={handleCalculateSimilarities}
-                      disabled={calculatingSimilarities || loading}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
-                    >
-                      {calculatingSimilarities ? 'Calculating...' : 'Calculate Similarities'}
-                    </button>
+                      )}
+                      {investigationResults.gemini?.error && (
+                        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                          <p className="text-red-700 mb-2">{investigationResults.gemini.model_name || 'Gemini'} Error: {investigationResults.gemini.error}</p>
+                          {investigationResults.gemini.raw_response && (
+                            <div>
+                              <button
+                                onClick={() => setExpandedRawResponses(prev => ({ ...prev, gemini: !prev.gemini }))}
+                                className="flex items-center gap-2 text-sm font-medium text-red-700 hover:text-red-900 mb-2"
+                              >
+                                <svg
+                                  className={`w-4 h-4 transition-transform ${expandedRawResponses.gemini ? 'rotate-180' : ''}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                                {expandedRawResponses.gemini ? 'Hide' : 'Show'} Raw Response
+                              </button>
+                              {expandedRawResponses.gemini && (
+                                <div className="p-4 bg-gray-900 rounded-lg overflow-auto max-h-96">
+                                  <pre className="text-xs text-green-400 font-mono whitespace-pre-wrap">
+                                    {investigationResults.gemini.raw_response}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
-                <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {keywords.map((keywordData, index) => (
+
+                  {/* Keywords from Excel Files */}
+                  {entry.keywords.length > 0 && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h3>
+                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {entry.keywords.map((keywordData, index) => (
                       <div
                         key={index}
                         className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
@@ -752,31 +889,61 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                       </div>
                     ))}
                   </div>
-                  <div className="mt-3 pt-3 border-t border-purple-200">
-                    <p className="text-sm text-gray-600">
-                      Total: <span className="font-semibold text-purple-700">{keywords.length}</span> keyword{keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{selectedFiles.length}</span> file{selectedFiles.length !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+                        <div className="mt-3 pt-3 border-t border-purple-200">
+                          <p className="text-sm text-gray-600">
+                            Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-            {/* Similarity Results for All Models */}
-            {similarityResults && similarityResults.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores (All Models)</h3>
-                {similarityResults.map((modelResult, modelIndex) => (
-                  <div key={modelIndex} className="mb-6">
-                    <h4 className="text-md font-semibold text-gray-800 mb-3">
-                      {investigationResults && 
-                        (modelResult.model === 'perplexity' 
-                          ? investigationResults.perplexity?.model_name || 'Perplexity Sonar'
-                          : modelResult.model === 'gpt'
-                          ? investigationResults.gpt?.model_name || 'GPT'
-                          : investigationResults.gemini?.model_name || 'Gemini')
-                      }
-                    </h4>
-                    <div className="space-y-4">
+                  {/* Similarity Results for All Models */}
+                  {entry.similarityResults && entry.similarityResults.length > 0 && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores (All Models)</h3>
+                      {entry.similarityResults.map((modelResult, modelIndex) => {
+                        const totalScore = modelResult.total_score ?? 0;
+                        const scorePercentage = (totalScore * 100).toFixed(2);
+                        const scoreColor =
+                          totalScore > 0.7
+                            ? 'text-green-700 bg-green-50 border-green-200'
+                            : totalScore > 0.5
+                            ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
+                            : 'text-gray-700 bg-gray-50 border-gray-200';
+                        
+                        return (
+                          <div key={modelIndex} className="mb-6">
+                            <div className="flex items-center justify-between mb-3">
+                              <h4 className="text-md font-semibold text-gray-800">
+                                {investigationResults && 
+                                  (modelResult.model === 'perplexity' 
+                                    ? investigationResults.perplexity?.model_name || 'Perplexity Sonar'
+                                    : modelResult.model === 'gpt'
+                                    ? investigationResults.gpt?.model_name || 'GPT'
+                                    : investigationResults.gemini?.model_name || 'Gemini')
+                                }
+                              </h4>
+                              <div className="flex items-center gap-3">
+                                <span className="text-sm text-gray-600 font-medium">Total Similarity Score:</span>
+                                <span className={`px-3 py-1 rounded-lg border font-semibold text-sm ${scoreColor}`}>
+                                  {scorePercentage}%
+                                </span>
+                                <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full ${
+                                      totalScore > 0.7
+                                        ? 'bg-green-500'
+                                        : totalScore > 0.5
+                                        ? 'bg-yellow-500'
+                                        : 'bg-gray-400'
+                                    }`}
+                                    style={{ width: `${Math.min(totalScore * 100, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            <div className="space-y-4">
                       {modelResult.results.map((result, keywordIndex) => (
                         <div
                           key={keywordIndex}
@@ -817,11 +984,17 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                                         ? 'text-yellow-700 bg-yellow-50 border-yellow-200'
                                         : 'text-gray-700 bg-gray-50 border-gray-200';
 
+                                    const isMatched = similarity.is_matched ?? false;
+                                    
                                     return (
                                       <tr
                                         key={simIndex}
                                         className={`border-b border-gray-100 hover:bg-gray-50 ${
-                                          similarity.is_main ? 'bg-emerald-50/30' : ''
+                                          isMatched 
+                                            ? 'bg-blue-100 border-l-4 border-blue-500' 
+                                            : similarity.is_main 
+                                            ? 'bg-emerald-50/30' 
+                                            : ''
                                         }`}
                                       >
                                         <td className="py-3 px-4">
@@ -829,6 +1002,11 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                                             <span className="font-medium text-gray-900">
                                               {similarity.perplexity_keyword}
                                             </span>
+                                            {isMatched && (
+                                              <span className="px-2 py-0.5 text-xs font-bold text-blue-700 bg-blue-200 rounded-full">
+                                                MATCHED
+                                              </span>
+                                            )}
                                             {similarity.is_main && (
                                               <span className="px-2 py-0.5 text-xs font-bold text-emerald-700 bg-emerald-100 rounded-full">
                                                 MAIN
@@ -870,234 +1048,36 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                             </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Legacy Investigation Results (for backward compatibility) */}
-        {investigationData && !investigationResults && (
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Website Analysis</h2>
-            
-            {/* Persona & Business Type */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-1">Target Audience</h3>
-                <p className="text-gray-900">{investigationData.persona}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-1">Business Type</h3>
-                <p className="text-gray-900">{investigationData.business_type}</p>
-              </div>
-            </div>
-
-            {/* Main Offering Keywords */}
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">Main Offering Keywords</h3>
-              <div className="grid grid-cols-1 gap-3">
-                {investigationData.keywords
-                  .sort((a, b) => (b.is_main ? 1 : 0) - (a.is_main ? 1 : 0))
-                  .map((keywordData, index) => (
-                    <div
-                      key={index}
-                      className={`p-4 rounded-lg border ${
-                        keywordData.is_main
-                          ? 'bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-300 ring-2 ring-emerald-200'
-                          : 'bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`flex-shrink-0 w-7 h-7 text-white rounded-full flex items-center justify-center font-semibold text-xs ${
-                            keywordData.is_main ? 'bg-emerald-600' : 'bg-blue-600'
-                          }`}
-                        >
-                          {keywordData.is_main ? (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                            </svg>
-                          ) : (
-                            keywordData.phrasing_index || index + 1
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <h4 className="font-semibold text-gray-900">
-                              {keywordData.keyword}
-                            </h4>
-                            {keywordData.is_main && (
-                              <span className="px-2 py-0.5 text-xs font-bold text-emerald-700 bg-emerald-100 rounded-full">
-                                MAIN
-                              </span>
-                            )}
+                            ))}
                           </div>
                         </div>
-                      </div>
+                        );
+                      })}
                     </div>
-                  ))}
-              </div>
-            </div>
-
-
-            {/* Custom Prompt Template */}
-            <div className="mb-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-3">Custom Gemini Prompt Template</h3>
-              <textarea
-                value={customPromptTemplate}
-                onChange={(e) => setCustomPromptTemplate(e.target.value)}
-                rows={15}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm text-gray-900"
-                placeholder="Enter custom prompt template..."
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Use placeholders: [OFFERING_LABEL], [OFFERING_DESCRIPTION], [PERSONA], [BUSINESS_TYPE], [CANDIDATE_PROMPTS]
-              </p>
-            </div>
-
-            {/* Generate Prompts Button */}
-            <button
-              onClick={handleGeneratePrompts}
-              disabled={loading}
-              className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-            >
-              Generate Prompts
-            </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Preview Results */}
-        {previewData && (
+        {/* Preview Results - TODO: Re-implement with new structure if needed */}
+        {false && (
           <div className="bg-white rounded-lg shadow-lg p-6">
             <h2 className="text-2xl font-semibold text-gray-900 mb-6">Prompt Analysis by Keyword</h2>
             
             <div className="space-y-8">
-              {previewData.offerings_with_prompts
-                .sort((a, b) => (b.offering.is_main ? 1 : 0) - (a.offering.is_main ? 1 : 0))
-                .map((offeringData, offeringIndex) => {
-                  const offering = offeringData.offering;
-                  const selectedPrompts = offeringData.selected_prompts || [];
-                  const promptSent = offeringData.prompt_sent || 'Prompt not available';
-
-                  return (
-                    <div
-                      key={offeringIndex}
-                      className={`rounded-lg overflow-hidden ${
-                        offering.is_main
-                          ? 'border-2 border-emerald-400 ring-2 ring-emerald-200'
-                          : 'border border-gray-200'
-                      }`}
-                    >
-                      {/* Phrasing Header */}
-                      <div
-                        className={`px-8 py-6 border-b border-gray-200 ${
-                          offering.is_main
-                            ? 'bg-gradient-to-r from-emerald-50 to-teal-50'
-                            : 'bg-gradient-to-r from-blue-50 to-indigo-50'
-                        }`}
-                      >
-                        <div className="flex items-start gap-4">
-                          <div
-                            className={`flex-shrink-0 w-10 h-10 text-white rounded-full flex items-center justify-center font-bold text-lg ${
-                              offering.is_main ? 'bg-emerald-600' : 'bg-blue-600'
-                            }`}
-                          >
-                            {offering.is_main ? (
-                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                            ) : (
-                              offering.phrasing_index || offeringIndex + 1
-                            )}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span
-                                className={`text-xs font-semibold uppercase tracking-wide ${
-                                  offering.is_main ? 'text-emerald-600' : 'text-blue-600'
-                                }`}
-                              >
-                                {offering.is_main ? 'Main Keyword' : `Keyword ${offering.phrasing_index || offeringIndex + 1}`}
-                              </span>
-                              {offering.is_main && (
-                                <span className="px-2 py-0.5 text-xs font-bold text-emerald-700 bg-emerald-100 rounded-full">
-                                  PRIMARY
-                                </span>
-                              )}
-                            </div>
-                            <h3 className="text-xl font-semibold text-gray-900 mb-1">
-                              {offering.keyword}
-                            </h3>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="p-8 space-y-8">
-                        {/* Prompt Sent to Gemini */}
-                        <div>
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                            Prompt Sent to Gemini
-                          </h4>
-                          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                            <pre className="whitespace-pre-wrap text-sm text-gray-800 font-mono">
-                              {promptSent}
-                            </pre>
-                          </div>
-                        </div>
-
-                        {/* Gemini's Response */}
-                        <div>
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                            <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Gemini&apos;s Response ({selectedPrompts.length} High-Quality Prompts Selected)
-                          </h4>
-                          {selectedPrompts.length === 0 ? (
-                            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800">
-                              No highly relevant prompts found for this keyword. Try adjusting the keyword or using a different phrasing.
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              {selectedPrompts.map((item, idx) => (
-                                <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                                  <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
-                                      {idx + 1}
-                                    </div>
-                                    <div className="flex-1">
-                                      <p className="text-gray-900 font-medium mb-2">{item.prompt}</p>
-                                      <p className="text-sm text-gray-600 italic">&quot;{item.reasoning}&quot;</p>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              {/* Preview functionality removed - can be re-added per website entry if needed */}
             </div>
           </div>
         )}
 
-        {(loading || calculatingSimilarities) && (
+        {loading && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                <span className="text-gray-900">
-                  {calculatingSimilarities ? 'Calculating similarities...' : 'Processing...'}
-                </span>
+                <span className="text-gray-900">Processing...</span>
               </div>
             </div>
           </div>
