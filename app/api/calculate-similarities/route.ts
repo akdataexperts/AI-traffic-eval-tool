@@ -99,6 +99,9 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      // Store embedding in a const to help TypeScript with type narrowing
+      const excelEmbedding = excelKeywordData.embedding;
+
       const similarities = perplexityKeywordEmbeddings.map((perplexityKeywordData) => {
         if (!perplexityKeywordData.embedding) {
           return {
@@ -109,7 +112,7 @@ export async function POST(request: NextRequest) {
           };
         }
 
-        const score = cosineSimilarity(excelKeywordData.embedding, perplexityKeywordData.embedding);
+        const score = cosineSimilarity(excelEmbedding, perplexityKeywordData.embedding);
         return {
           perplexity_keyword: perplexityKeywordData.keyword,
           phrasing_index: perplexityKeywordData.phrasing_index,
