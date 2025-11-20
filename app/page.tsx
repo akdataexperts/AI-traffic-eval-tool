@@ -30,6 +30,7 @@ interface ModelInvestigationResult {
   business_type: string;
   error?: string;
   raw_response?: string;
+  model_name?: string;
 }
 
 interface InvestigationResults {
@@ -89,7 +90,7 @@ export default function Home() {
   const [similarityResults, setSimilarityResults] = useState<ModelSimilarityResults[] | null>(null);
   const [calculatingSimilarities, setCalculatingSimilarities] = useState(false);
   const [expandedRawResponses, setExpandedRawResponses] = useState<{ [key: string]: boolean }>({});
-  const [perplexityPrompt, setPerplexityPrompt] = useState(`Go online to {domainName} and investigate what they do.
+  const [investigationPrompt, setInvestigationPrompt] = useState(`Go online to {domainName} and investigate what they do.
 
 Based on your research, provide:
 1. what are problems solved by {domainName} & what are the solutions offered by {domainName} 
@@ -169,9 +170,9 @@ Important: Output ONLY your selections in the format above, nothing else.`);
       const response = await fetch('/api/investigate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+          body: JSON.stringify({ 
           website_url: websiteUrl,
-          custom_prompt: perplexityPrompt || undefined,
+          custom_prompt: investigationPrompt || undefined,
         }),
       });
 
@@ -389,22 +390,22 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             </div>
           </div>
 
-          {/* Perplexity Prompt Editor */}
+          {/* Investigation Prompt Editor */}
           <div className="mt-4">
-            <label htmlFor="perplexity-prompt" className="block text-sm font-medium text-gray-700 mb-2">
-              Perplexity Investigation Prompt (Editable)
+            <label htmlFor="investigation-prompt" className="block text-sm font-medium text-gray-700 mb-2">
+              Investigation Prompt (Editable)
             </label>
             <textarea
-              id="perplexity-prompt"
-              value={perplexityPrompt}
-              onChange={(e) => setPerplexityPrompt(e.target.value)}
+              id="investigation-prompt"
+              value={investigationPrompt}
+              onChange={(e) => setInvestigationPrompt(e.target.value)}
               rows={8}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
               placeholder="Leave empty to use default prompt. Use {domainName} and {baseDomain} as placeholders."
               disabled={loading}
             />
             <p className="text-xs text-gray-500 mt-2">
-              Leave empty to use the default prompt. The prompt will be sent to Perplexity AI for website investigation.
+              Leave empty to use the default prompt. The prompt will be sent to all models (Perplexity, GPT, and Gemini) for website investigation.
               Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
             </p>
           </div>
@@ -460,17 +461,17 @@ Important: Output ONLY your selections in the format above, nothing else.`);
               <div className="flex gap-4">
                 {investigationResults.perplexity && (
                   <button className="px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-semibold">
-                    Perplexity Sonar
+                    {investigationResults.perplexity.model_name || 'Perplexity Sonar'}
                   </button>
                 )}
                 {investigationResults.gpt && (
                   <button className="px-4 py-2 border-b-2 border-green-600 text-green-600 font-semibold">
-                    GPT 5.1
+                    {investigationResults.gpt.model_name || 'GPT'}
                   </button>
                 )}
                 {investigationResults.gemini && (
                   <button className="px-4 py-2 border-b-2 border-purple-600 text-purple-600 font-semibold">
-                    Gemini 2.5 Pro
+                    {investigationResults.gemini.model_name || 'Gemini'}
                   </button>
                 )}
               </div>
@@ -479,7 +480,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             {/* Display results for each model */}
             {investigationResults.perplexity && !investigationResults.perplexity.error && (
               <div className="mb-8 p-4 border border-blue-200 rounded-lg bg-blue-50/30">
-                <h3 className="text-xl font-semibold text-blue-900 mb-4">Perplexity Sonar Results</h3>
+                <h3 className="text-xl font-semibold text-blue-900 mb-4">{investigationResults.perplexity.model_name || 'Perplexity Sonar'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-1">Target Audience</h4>
@@ -530,7 +531,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             )}
             {investigationResults.gpt && !investigationResults.gpt.error && (
               <div className="mb-8 p-4 border border-green-200 rounded-lg bg-green-50/30">
-                <h3 className="text-xl font-semibold text-green-900 mb-4">GPT 5.1 Results</h3>
+                <h3 className="text-xl font-semibold text-green-900 mb-4">{investigationResults.gpt.model_name || 'GPT'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-1">Target Audience</h4>
@@ -581,7 +582,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             )}
             {investigationResults.gemini && !investigationResults.gemini.error && (
               <div className="mb-8 p-4 border border-purple-200 rounded-lg bg-purple-50/30">
-                <h3 className="text-xl font-semibold text-purple-900 mb-4">Gemini 2.5 Pro Results</h3>
+                <h3 className="text-xl font-semibold text-purple-900 mb-4">{investigationResults.gemini.model_name || 'Gemini'} Results</h3>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 mb-1">Target Audience</h4>
@@ -634,7 +635,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             {/* Error messages for failed models */}
             {investigationResults.perplexity?.error && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-700 mb-2">Perplexity Sonar Error: {investigationResults.perplexity.error}</p>
+                <p className="text-red-700 mb-2">{investigationResults.perplexity.model_name || 'Perplexity Sonar'} Error: {investigationResults.perplexity.error}</p>
                 {investigationResults.perplexity.raw_response && (
                   <div>
                     <button
@@ -664,7 +665,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             )}
             {investigationResults.gpt?.error && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-700 mb-2">GPT 5.1 Error: {investigationResults.gpt.error}</p>
+                <p className="text-red-700 mb-2">{investigationResults.gpt.model_name || 'GPT'} Error: {investigationResults.gpt.error}</p>
                 {investigationResults.gpt.raw_response && (
                   <div>
                     <button
@@ -694,7 +695,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
             )}
             {investigationResults.gemini?.error && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <p className="text-red-700 mb-2">Gemini 2.5 Pro Error: {investigationResults.gemini.error}</p>
+                <p className="text-red-700 mb-2">{investigationResults.gemini.model_name || 'Gemini'} Error: {investigationResults.gemini.error}</p>
                 {investigationResults.gemini.raw_response && (
                   <div>
                     <button
@@ -774,8 +775,14 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                 <h3 className="text-lg font-semibold text-gray-900 mb-3">Keyword-Offering Similarity Scores (All Models)</h3>
                 {similarityResults.map((modelResult, modelIndex) => (
                   <div key={modelIndex} className="mb-6">
-                    <h4 className="text-md font-semibold text-gray-800 mb-3 capitalize">
-                      {modelResult.model === 'perplexity' ? 'Perplexity Sonar' : modelResult.model === 'gpt' ? 'GPT 5.1' : 'Gemini 2.5 Pro'}
+                    <h4 className="text-md font-semibold text-gray-800 mb-3">
+                      {investigationResults && 
+                        (modelResult.model === 'perplexity' 
+                          ? investigationResults.perplexity?.model_name || 'Perplexity Sonar'
+                          : modelResult.model === 'gpt'
+                          ? investigationResults.gpt?.model_name || 'GPT'
+                          : investigationResults.gemini?.model_name || 'Gemini')
+                      }
                     </h4>
                     <div className="space-y-4">
                       {modelResult.results.map((result, keywordIndex) => (

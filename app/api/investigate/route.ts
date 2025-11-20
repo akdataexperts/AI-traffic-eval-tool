@@ -263,17 +263,16 @@ Important: Output ONLY the specified lines, nothing else.`;
         return response.choices[0].message.content.trim();
       }),
       
-      // OpenAI GPT 5.1 (Note: If GPT 5.1 is not available, adjust model name to available version like 'gpt-4o')
-      openAIClient.chat.completions.create({
-        model: 'gpt-4o', // Update to 'gpt-5.1' or correct model name when available
-        messages: [{ role: 'user' as const, content: prompt }],
-        temperature: 0.1,
-        max_tokens: 800, // Increased to allow more complete responses
+      // OpenAI GPT with Web Search enabled
+      openAIClient.responses.create({
+        model: 'gpt-4o',
+        tools: [{ type: 'web_search_preview' }],
+        input: prompt,
       }).then(response => {
-        if (!response || !response.choices || !response.choices[0].message.content) {
+        if (!response || !response.output_text) {
           throw new Error('OpenAI returned empty response');
         }
-        const content = response.choices[0].message.content.trim();
+        const content = response.output_text.trim();
         console.log(`[${new Date().toISOString()}] GPT raw response (first 500 chars):`, content.substring(0, 500));
         return content;
       }),
@@ -303,12 +302,14 @@ Important: Output ONLY the specified lines, nothing else.`;
         results.perplexity = {
           ...parsed,
           raw_response: perplexityResponse.value,
+          model_name: 'sonar',
         };
       } catch (error: any) {
         console.error(`[${new Date().toISOString()}] Error parsing Perplexity response:`, error);
         results.perplexity = { 
           error: error.message,
           raw_response: perplexityResponse.value || 'No response received',
+          model_name: 'sonar',
         };
       }
     } else {
@@ -316,6 +317,7 @@ Important: Output ONLY the specified lines, nothing else.`;
       results.perplexity = { 
         error: perplexityResponse.reason?.message || 'Perplexity request failed',
         raw_response: 'Request failed - no response received',
+        model_name: 'sonar',
       };
     }
 
@@ -325,12 +327,14 @@ Important: Output ONLY the specified lines, nothing else.`;
         results.gpt = {
           ...parsed,
           raw_response: openaiResponse.value,
+          model_name: 'gpt-4o (with web_search_preview)',
         };
       } catch (error: any) {
         console.error(`[${new Date().toISOString()}] Error parsing GPT response:`, error);
         results.gpt = { 
           error: error.message,
           raw_response: openaiResponse.value || 'No response received',
+          model_name: 'gpt-4o (with web_search_preview)',
         };
       }
     } else {
@@ -338,6 +342,7 @@ Important: Output ONLY the specified lines, nothing else.`;
       results.gpt = { 
         error: openaiResponse.reason?.message || 'GPT request failed',
         raw_response: 'Request failed - no response received',
+        model_name: 'gpt-4o (with web_search_preview)',
       };
     }
 
@@ -347,12 +352,14 @@ Important: Output ONLY the specified lines, nothing else.`;
         results.gemini = {
           ...parsed,
           raw_response: geminiResponse.value,
+          model_name: 'gemini-2.0-flash-exp',
         };
       } catch (error: any) {
         console.error(`[${new Date().toISOString()}] Error parsing Gemini response:`, error);
         results.gemini = { 
           error: error.message,
           raw_response: geminiResponse.value || 'No response received',
+          model_name: 'gemini-2.0-flash-exp',
         };
       }
     } else {
@@ -360,6 +367,7 @@ Important: Output ONLY the specified lines, nothing else.`;
       results.gemini = { 
         error: geminiResponse.reason?.message || 'Gemini request failed',
         raw_response: 'Request failed - no response received',
+        model_name: 'gemini-2.0-flash-exp',
       };
     }
 
