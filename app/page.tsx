@@ -377,7 +377,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
                 placeholder="https://example.com"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 disabled={loading}
               />
               <button
@@ -400,7 +400,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
               value={investigationPrompt}
               onChange={(e) => setInvestigationPrompt(e.target.value)}
               rows={8}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm text-gray-900"
               placeholder="Leave empty to use default prompt. Use {domainName} and {baseDomain} as placeholders."
               disabled={loading}
             />
@@ -959,7 +959,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                 value={customPromptTemplate}
                 onChange={(e) => setCustomPromptTemplate(e.target.value)}
                 rows={15}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm text-gray-900"
                 placeholder="Enter custom prompt template..."
               />
               <p className="text-xs text-gray-500 mt-2">
