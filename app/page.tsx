@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 
 interface InvestigationData {
@@ -80,6 +80,13 @@ interface ModelSimilarityResults {
   total_score?: number;
 }
 
+interface SearchResult {
+  keyword: string;
+  collection: string;
+  first_prompt: string;
+  similarityScore: number;
+}
+
 interface WebsiteEntry {
   id: string;
   url: string;
@@ -101,22 +108,49 @@ export default function Home() {
   const [expandedWebsiteResults, setExpandedWebsiteResults] = useState<{ [key: string]: boolean }>({});
   const [activeLLMTab, setActiveLLMTab] = useState<{ [key: string]: string }>({});
   const [expandedSimilarityKeywords, setExpandedSimilarityKeywords] = useState<{ [key: string]: boolean }>({});
-  const [investigationPrompt, setInvestigationPrompt] = useState(`Go online to {domainName} and investigate what they do.
+  const [expandedKeywordsComparison, setExpandedKeywordsComparison] = useState<{ [key: string]: boolean }>({});
+  const [selectedKeywords, setSelectedKeywords] = useState<{ [key: string]: string[] }>({});
+  const [searchResults, setSearchResults] = useState<{ [key: string]: SearchResult[] }>({});
+  const [isSearching, setIsSearching] = useState<{ [key: string]: boolean }>({});
+  const [expandedSearchKeywords, setExpandedSearchKeywords] = useState<{ [key: string]: boolean }>({});
+  const [expandedSearchCollections, setExpandedSearchCollections] = useState<{ [key: string]: boolean }>({});
+  const [investigationPrompt, setInvestigationPrompt] = useState(`Prohibited:
+No sentences
+No explanations
+No descriptions
+No narrative text
+No labels like “Keywords” or numbering
+no duplicates
 
-Based on your research, provide:
-1. what are problems solved by {domainName} & what are the solutions offered by {domainName} 
+Go online to {domainName} and identify exactly what the company offers.
 
-Make sure you mention key aspects of the offering and the relevant industry and how it differs from others
+If the company has multiple products or product lines, select the primary ones that define the core value of the business.
 
-more keywords for more specific answers
+Determine the specific industry, platform, or problem area the company focuses on. If leaving this vague would make the service resemble a more general category, define it precisely. Call this {scope}.
 
-final list should be a list 5 best combination of 2 to 5 keywords.
+Create keywords that describe:
 
-Example format:
+the problems the company solves
 
-data security challenges | enterprise encryption solutions | performance bottlenecks | cloud infrastructure services| budget overruns | budget management software
+the solutions it provides
 
-Important: Output ONLY the keywords separated by |, nothing else.`);
+Produce exactly five entries.
+
+Each entry must follow all rules below:
+
+Begin with {scope}.
+
+Add 2 to 5 keywords after {scope}.
+
+Entries move from general to specific.
+
+Later entries contain more keywords.
+
+Format the final output as five entries separated by |, exactly like this:
+
+youtube revenues | youtube localisation | youtube content | youtube auto-dubbing | youtube growth automation
+
+Output only the final list of keyword combinations.`);
   const [customPromptTemplate, setCustomPromptTemplate] = useState(`You are a marketing strategist analyzing search intent and user behavior.
 
 Website Context:
@@ -356,7 +390,81 @@ Important: Output ONLY your selections in the format above, nothing else.`);
 
   // Note: handleGeneratePrompts removed - functionality can be re-added per website entry if needed
 
+  const handleSearchKeywords = async (entryId: string, model: string, keywords: string[]) => {
+    if (keywords.length === 0) {
+      setError('Please select at least one keyword to search');
+      return;
+    }
 
+    const searchKey = `${entryId}-${model}`;
+    setIsSearching(prev => ({ ...prev, [searchKey]: true }));
+    setError(null);
+
+    try {
+      const response = await fetch('/api/search-keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keywords }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Search failed');
+      }
+
+      const data = await response.json();
+      setSearchResults(prev => ({ ...prev, [searchKey]: data.results || [] }));
+    } catch (err: any) {
+      setError(err.message || 'Failed to search keywords');
+      setSearchResults(prev => ({ ...prev, [searchKey]: [] }));
+    } finally {
+      setIsSearching(prev => ({ ...prev, [searchKey]: false }));
+    }
+  };
+
+  const toggleKeywordSelection = (entryId: string, model: string, keyword: string) => {
+    const key = `${entryId}-${model}`;
+    setSelectedKeywords(prev => {
+      const current = prev[key] || [];
+      if (current.includes(keyword)) {
+        return { ...prev, [key]: current.filter(k => k !== keyword) };
+      } else {
+        return { ...prev, [key]: [...current, keyword] };
+      }
+    });
+  };
+
+  // Initialize all keywords as selected when investigation results are available
+  useEffect(() => {
+    const newSelectedKeywords: { [key: string]: string[] } = {};
+    
+    websiteEntries.forEach(entry => {
+      if (entry.investigationResults) {
+        if (entry.investigationResults.perplexity && !entry.investigationResults.perplexity.error) {
+          const key = `${entry.id}-perplexity`;
+          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
+            newSelectedKeywords[key] = entry.investigationResults.perplexity.keywords.map(kw => kw.keyword);
+          }
+        }
+        if (entry.investigationResults.gpt && !entry.investigationResults.gpt.error) {
+          const key = `${entry.id}-gpt`;
+          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
+            newSelectedKeywords[key] = entry.investigationResults.gpt.keywords.map(kw => kw.keyword);
+          }
+        }
+        if (entry.investigationResults.gemini && !entry.investigationResults.gemini.error) {
+          const key = `${entry.id}-gemini`;
+          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
+            newSelectedKeywords[key] = entry.investigationResults.gemini.keywords.map(kw => kw.keyword);
+          }
+        }
+      }
+    });
+
+    if (Object.keys(newSelectedKeywords).length > 0) {
+      setSelectedKeywords(prev => ({ ...prev, ...newSelectedKeywords }));
+    }
+  }, [websiteEntries]);
 
   return (
     <main className="min-h-screen p-8 bg-gradient-to-br from-gray-50 to-gray-100">
@@ -691,6 +799,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     ))}
                   </div>
                 </div>
+                
                 {/* Raw Response */}
                 {investigationResults.perplexity.raw_response && (
                   <div className="mt-4">
@@ -718,42 +827,66 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                   </div>
                 )}
                 
-                {/* Keywords from Excel Files */}
-                {entry.keywords.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
-                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {entry.keywords.map((keywordData, index) => (
-                          <div
-                            key={index}
-                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
-                          >
-                            <div className="flex items-start gap-2">
-                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
-                                {index + 1}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
-                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
-                                  {keywordData.fileName}
-                                </p>
+                {/* Keywords Comparison - Collapsible */}
+                {((entry.keywords.length > 0) || (entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'perplexity'))) && (() => {
+                  const keywordsComparisonKey = `${entry.id}-perplexity-keywords-comparison`;
+                  const isKeywordsComparisonExpanded = expandedKeywordsComparison[keywordsComparisonKey] || false;
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <button
+                        onClick={() => setExpandedKeywordsComparison(prev => ({ ...prev, [keywordsComparisonKey]: !prev[keywordsComparisonKey] }))}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                      >
+                        <h4 className="text-lg font-semibold text-gray-900">Keywords Comparison</h4>
+                        <svg
+                          className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordsComparisonExpanded ? 'rotate-180' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {isKeywordsComparisonExpanded && (
+                        <div className="mt-4 space-y-6">
+                          {/* Keywords from Excel Files */}
+                          {entry.keywords.length > 0 && (
+                            <div>
+                              <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {entry.keywords.map((keywordData, index) => (
+                                    <div
+                                      key={index}
+                                      className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                          {index + 1}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                          <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                            {keywordData.fileName}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-3 pt-3 border-t border-purple-200">
+                                  <p className="text-sm text-gray-600">
+                                    Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-purple-200">
-                        <p className="text-sm text-gray-600">
-                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Similarity Results for Perplexity */}
-                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'perplexity') && (() => {
+                          )}
+                          
+                          {/* Similarity Results for Perplexity */}
+                          {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'perplexity') && (() => {
                   const modelResult = entry.similarityResults!.find(sr => sr.model === 'perplexity')!;
                   const totalScore = modelResult.total_score ?? 0;
                   const scorePercentage = (totalScore * 100).toFixed(2);
@@ -898,6 +1031,165 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     </div>
                   );
                 })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                
+                {/* Keyword Search Section - At the bottom */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Search Keywords in Database</h4>
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600 mb-3">Select keywords to search in 3 collections:</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                      {investigationResults.perplexity.keywords.map((kw, idx) => {
+                        const searchKey = `${entry.id}-perplexity`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        const isSelected = selected.includes(kw.keyword);
+                        return (
+                          <label
+                            key={idx}
+                            className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-blue-100 border-blue-500'
+                                : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleKeywordSelection(entry.id, 'perplexity', kw.keyword)}
+                              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-sm text-gray-900 flex-1">{kw.keyword}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const searchKey = `${entry.id}-perplexity`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        handleSearchKeywords(entry.id, 'perplexity', selected);
+                      }}
+                      disabled={isSearching[`${entry.id}-perplexity`] || (selectedKeywords[`${entry.id}-perplexity`] || []).length === 0}
+                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isSearching[`${entry.id}-perplexity`] ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Searching...
+                        </>
+                      ) : (
+                        'Search Keywords'
+                      )}
+                    </button>
+                  </div>
+                  
+                  {/* Search Results - Hierarchical: Keyword → Collection → Prompts */}
+                  {searchResults[`${entry.id}-perplexity`] && searchResults[`${entry.id}-perplexity`].length > 0 && (() => {
+                    const results = searchResults[`${entry.id}-perplexity`];
+                    
+                    // Group results by keyword, then by collection
+                    const groupedResults: { [keyword: string]: { [collection: string]: SearchResult[] } } = {};
+                    results.forEach(result => {
+                      if (!groupedResults[result.keyword]) {
+                        groupedResults[result.keyword] = {};
+                      }
+                      if (!groupedResults[result.keyword][result.collection]) {
+                        groupedResults[result.keyword][result.collection] = [];
+                      }
+                      groupedResults[result.keyword][result.collection].push(result);
+                    });
+
+                    return (
+                      <div className="mt-4">
+                        <h5 className="text-md font-semibold text-gray-900 mb-3">
+                          Results ({results.length} prompts)
+                        </h5>
+                        <div className="space-y-2">
+                          {Object.entries(groupedResults).map(([keyword, collections]) => {
+                            const keywordKey = `${entry.id}-perplexity-keyword-${keyword}`;
+                            const isKeywordExpanded = expandedSearchKeywords[keywordKey] || false;
+                            const totalPrompts = Object.values(collections).reduce((sum, prompts) => sum + prompts.length, 0);
+                            
+                            return (
+                              <div key={keyword} className="border border-gray-200 rounded-lg overflow-hidden">
+                                <button
+                                  onClick={() => setExpandedSearchKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                  className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <svg
+                                      className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-90' : ''}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    <span className="font-semibold text-gray-900">{keyword}</span>
+                                    <span className="text-sm text-gray-600">({totalPrompts} prompts)</span>
+                                  </div>
+                                </button>
+                                
+                                {isKeywordExpanded && (
+                                  <div className="bg-white">
+                                    {Object.entries(collections).map(([collection, prompts]) => {
+                                      const collectionKey = `${keywordKey}-collection-${collection}`;
+                                      const isCollectionExpanded = expandedSearchCollections[collectionKey] || false;
+                                      
+                                      return (
+                                        <div key={collection} className="border-t border-gray-200">
+                                          <button
+                                            onClick={() => setExpandedSearchCollections(prev => ({ ...prev, [collectionKey]: !prev[collectionKey] }))}
+                                            className="w-full flex items-center justify-between px-6 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              <svg
+                                                className={`w-4 h-4 text-gray-600 transition-transform ${isCollectionExpanded ? 'rotate-90' : ''}`}
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                              </svg>
+                                              <span className="font-medium text-gray-900">{collection}</span>
+                                              <span className="text-sm text-gray-600">({prompts.length} prompts)</span>
+                                            </div>
+                                          </button>
+                                          
+                                          {isCollectionExpanded && (
+                                            <div className="px-6 py-3 space-y-2 max-h-96 overflow-y-auto">
+                                              {prompts.map((result, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="p-3 bg-white border border-gray-200 rounded-lg text-sm"
+                                                >
+                                                  <div className="flex items-center gap-2 mb-1">
+                                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                                      Score: {(result.similarityScore * 100).toFixed(1)}%
+                                                    </span>
+                                                  </div>
+                                                  <p className="text-gray-900 mt-1">{result.first_prompt}</p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
                       )}
                       {activeTab === 'gpt' && investigationResults.gpt && !investigationResults.gpt.error && (
@@ -923,6 +1215,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     ))}
                   </div>
                 </div>
+                
                 {/* Raw Response */}
                 {investigationResults.gpt.raw_response && (
                   <div className="mt-4">
@@ -950,42 +1243,66 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                   </div>
                 )}
                 
-                {/* Keywords from Excel Files */}
-                {entry.keywords.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
-                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {entry.keywords.map((keywordData, index) => (
-                          <div
-                            key={index}
-                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
-                          >
-                            <div className="flex items-start gap-2">
-                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
-                                {index + 1}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
-                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
-                                  {keywordData.fileName}
-                                </p>
+                {/* Keywords Comparison - Collapsible */}
+                {((entry.keywords.length > 0) || (entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gpt'))) && (() => {
+                  const keywordsComparisonKey = `${entry.id}-gpt-keywords-comparison`;
+                  const isKeywordsComparisonExpanded = expandedKeywordsComparison[keywordsComparisonKey] || false;
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <button
+                        onClick={() => setExpandedKeywordsComparison(prev => ({ ...prev, [keywordsComparisonKey]: !prev[keywordsComparisonKey] }))}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                      >
+                        <h4 className="text-lg font-semibold text-gray-900">Keywords Comparison</h4>
+                        <svg
+                          className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordsComparisonExpanded ? 'rotate-180' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {isKeywordsComparisonExpanded && (
+                        <div className="mt-4 space-y-6">
+                          {/* Keywords from Excel Files */}
+                          {entry.keywords.length > 0 && (
+                            <div>
+                              <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {entry.keywords.map((keywordData, index) => (
+                                    <div
+                                      key={index}
+                                      className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                          {index + 1}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                          <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                            {keywordData.fileName}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-3 pt-3 border-t border-purple-200">
+                                  <p className="text-sm text-gray-600">
+                                    Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-purple-200">
-                        <p className="text-sm text-gray-600">
-                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Similarity Results for GPT */}
-                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gpt') && (() => {
+                          )}
+                          
+                          {/* Similarity Results for GPT */}
+                          {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gpt') && (() => {
                   const modelResult = entry.similarityResults!.find(sr => sr.model === 'gpt')!;
                   const totalScore = modelResult.total_score ?? 0;
                   const scorePercentage = (totalScore * 100).toFixed(2);
@@ -1130,6 +1447,165 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     </div>
                   );
                 })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                
+                {/* Keyword Search Section - At the bottom */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Search Keywords in Database</h4>
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600 mb-3">Select keywords to search in 3 collections:</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                      {investigationResults.gpt.keywords.map((kw, idx) => {
+                        const searchKey = `${entry.id}-gpt`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        const isSelected = selected.includes(kw.keyword);
+                        return (
+                          <label
+                            key={idx}
+                            className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-green-100 border-green-500'
+                                : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleKeywordSelection(entry.id, 'gpt', kw.keyword)}
+                              className="w-4 h-4 text-green-600 rounded focus:ring-green-500"
+                            />
+                            <span className="text-sm text-gray-900 flex-1">{kw.keyword}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const searchKey = `${entry.id}-gpt`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        handleSearchKeywords(entry.id, 'gpt', selected);
+                      }}
+                      disabled={isSearching[`${entry.id}-gpt`] || (selectedKeywords[`${entry.id}-gpt`] || []).length === 0}
+                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isSearching[`${entry.id}-gpt`] ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Searching...
+                        </>
+                      ) : (
+                        'Search Keywords'
+                      )}
+                    </button>
+                  </div>
+                  
+                  {/* Search Results - Hierarchical: Keyword → Collection → Prompts */}
+                  {searchResults[`${entry.id}-gpt`] && searchResults[`${entry.id}-gpt`].length > 0 && (() => {
+                    const results = searchResults[`${entry.id}-gpt`];
+                    
+                    // Group results by keyword, then by collection
+                    const groupedResults: { [keyword: string]: { [collection: string]: SearchResult[] } } = {};
+                    results.forEach(result => {
+                      if (!groupedResults[result.keyword]) {
+                        groupedResults[result.keyword] = {};
+                      }
+                      if (!groupedResults[result.keyword][result.collection]) {
+                        groupedResults[result.keyword][result.collection] = [];
+                      }
+                      groupedResults[result.keyword][result.collection].push(result);
+                    });
+
+                    return (
+                      <div className="mt-4">
+                        <h5 className="text-md font-semibold text-gray-900 mb-3">
+                          Results ({results.length} prompts)
+                        </h5>
+                        <div className="space-y-2">
+                          {Object.entries(groupedResults).map(([keyword, collections]) => {
+                            const keywordKey = `${entry.id}-gpt-keyword-${keyword}`;
+                            const isKeywordExpanded = expandedSearchKeywords[keywordKey] || false;
+                            const totalPrompts = Object.values(collections).reduce((sum, prompts) => sum + prompts.length, 0);
+                            
+                            return (
+                              <div key={keyword} className="border border-gray-200 rounded-lg overflow-hidden">
+                                <button
+                                  onClick={() => setExpandedSearchKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                  className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <svg
+                                      className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-90' : ''}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    <span className="font-semibold text-gray-900">{keyword}</span>
+                                    <span className="text-sm text-gray-600">({totalPrompts} prompts)</span>
+                                  </div>
+                                </button>
+                                
+                                {isKeywordExpanded && (
+                                  <div className="bg-white">
+                                    {Object.entries(collections).map(([collection, prompts]) => {
+                                      const collectionKey = `${keywordKey}-collection-${collection}`;
+                                      const isCollectionExpanded = expandedSearchCollections[collectionKey] || false;
+                                      
+                                      return (
+                                        <div key={collection} className="border-t border-gray-200">
+                                          <button
+                                            onClick={() => setExpandedSearchCollections(prev => ({ ...prev, [collectionKey]: !prev[collectionKey] }))}
+                                            className="w-full flex items-center justify-between px-6 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              <svg
+                                                className={`w-4 h-4 text-gray-600 transition-transform ${isCollectionExpanded ? 'rotate-90' : ''}`}
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                              </svg>
+                                              <span className="font-medium text-gray-900">{collection}</span>
+                                              <span className="text-sm text-gray-600">({prompts.length} prompts)</span>
+                                            </div>
+                                          </button>
+                                          
+                                          {isCollectionExpanded && (
+                                            <div className="px-6 py-3 space-y-2 max-h-96 overflow-y-auto">
+                                              {prompts.map((result, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="p-3 bg-white border border-gray-200 rounded-lg text-sm"
+                                                >
+                                                  <div className="flex items-center gap-2 mb-1">
+                                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                                      Score: {(result.similarityScore * 100).toFixed(1)}%
+                                                    </span>
+                                                  </div>
+                                                  <p className="text-gray-900 mt-1">{result.first_prompt}</p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
                       )}
                       {activeTab === 'gemini' && investigationResults.gemini && !investigationResults.gemini.error && (
@@ -1155,6 +1631,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     ))}
                   </div>
                 </div>
+                
                 {/* Raw Response */}
                 {investigationResults.gemini.raw_response && (
                   <div className="mt-4">
@@ -1182,42 +1659,66 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                   </div>
                 )}
                 
-                {/* Keywords from Excel Files */}
-                {entry.keywords.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
-                    <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {entry.keywords.map((keywordData, index) => (
-                          <div
-                            key={index}
-                            className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
-                          >
-                            <div className="flex items-start gap-2">
-                              <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
-                                {index + 1}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
-                                <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
-                                  {keywordData.fileName}
-                                </p>
+                {/* Keywords Comparison - Collapsible */}
+                {((entry.keywords.length > 0) || (entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gemini'))) && (() => {
+                  const keywordsComparisonKey = `${entry.id}-gemini-keywords-comparison`;
+                  const isKeywordsComparisonExpanded = expandedKeywordsComparison[keywordsComparisonKey] || false;
+                  
+                  return (
+                    <div className="mt-6 pt-6 border-t border-gray-200">
+                      <button
+                        onClick={() => setExpandedKeywordsComparison(prev => ({ ...prev, [keywordsComparisonKey]: !prev[keywordsComparisonKey] }))}
+                        className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg hover:from-indigo-100 hover:to-purple-100 transition-colors"
+                      >
+                        <h4 className="text-lg font-semibold text-gray-900">Keywords Comparison</h4>
+                        <svg
+                          className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordsComparisonExpanded ? 'rotate-180' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      
+                      {isKeywordsComparisonExpanded && (
+                        <div className="mt-4 space-y-6">
+                          {/* Keywords from Excel Files */}
+                          {entry.keywords.length > 0 && (
+                            <div>
+                              <h4 className="text-lg font-semibold text-gray-900 mb-3">Keywords from Excel Files</h4>
+                              <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {entry.keywords.map((keywordData, index) => (
+                                    <div
+                                      key={index}
+                                      className="bg-white rounded-lg border border-purple-200 p-3 shadow-sm"
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <div className="flex-shrink-0 w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center font-semibold text-xs">
+                                          {index + 1}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-gray-900 font-medium break-words">{keywordData.keyword}</p>
+                                          <p className="text-xs text-gray-500 mt-1 truncate" title={keywordData.fileName}>
+                                            {keywordData.fileName}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-3 pt-3 border-t border-purple-200">
+                                  <p className="text-sm text-gray-600">
+                                    Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-purple-200">
-                        <p className="text-sm text-gray-600">
-                          Total: <span className="font-semibold text-purple-700">{entry.keywords.length}</span> keyword{entry.keywords.length !== 1 ? 's' : ''} from <span className="font-semibold text-purple-700">{entry.excelFiles.length}</span> file{entry.excelFiles.length !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Similarity Results for Gemini */}
-                {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gemini') && (() => {
+                          )}
+                          
+                          {/* Similarity Results for Gemini */}
+                          {entry.similarityResults && entry.similarityResults.find(sr => sr.model === 'gemini') && (() => {
                   const modelResult = entry.similarityResults!.find(sr => sr.model === 'gemini')!;
                   const totalScore = modelResult.total_score ?? 0;
                   const scorePercentage = (totalScore * 100).toFixed(2);
@@ -1362,6 +1863,165 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     </div>
                   );
                 })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                
+                {/* Keyword Search Section - At the bottom */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Search Keywords in Database</h4>
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-600 mb-3">Select keywords to search in 3 collections:</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                      {investigationResults.gemini.keywords.map((kw, idx) => {
+                        const searchKey = `${entry.id}-gemini`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        const isSelected = selected.includes(kw.keyword);
+                        return (
+                          <label
+                            key={idx}
+                            className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-purple-100 border-purple-500'
+                                : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleKeywordSelection(entry.id, 'gemini', kw.keyword)}
+                              className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-gray-900 flex-1">{kw.keyword}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => {
+                        const searchKey = `${entry.id}-gemini`;
+                        const selected = selectedKeywords[searchKey] || [];
+                        handleSearchKeywords(entry.id, 'gemini', selected);
+                      }}
+                      disabled={isSearching[`${entry.id}-gemini`] || (selectedKeywords[`${entry.id}-gemini`] || []).length === 0}
+                      className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isSearching[`${entry.id}-gemini`] ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Searching...
+                        </>
+                      ) : (
+                        'Search Keywords'
+                      )}
+                    </button>
+                  </div>
+                  
+                  {/* Search Results - Hierarchical: Keyword → Collection → Prompts */}
+                  {searchResults[`${entry.id}-gemini`] && searchResults[`${entry.id}-gemini`].length > 0 && (() => {
+                    const results = searchResults[`${entry.id}-gemini`];
+                    
+                    // Group results by keyword, then by collection
+                    const groupedResults: { [keyword: string]: { [collection: string]: SearchResult[] } } = {};
+                    results.forEach(result => {
+                      if (!groupedResults[result.keyword]) {
+                        groupedResults[result.keyword] = {};
+                      }
+                      if (!groupedResults[result.keyword][result.collection]) {
+                        groupedResults[result.keyword][result.collection] = [];
+                      }
+                      groupedResults[result.keyword][result.collection].push(result);
+                    });
+
+                    return (
+                      <div className="mt-4">
+                        <h5 className="text-md font-semibold text-gray-900 mb-3">
+                          Results ({results.length} prompts)
+                        </h5>
+                        <div className="space-y-2">
+                          {Object.entries(groupedResults).map(([keyword, collections]) => {
+                            const keywordKey = `${entry.id}-gemini-keyword-${keyword}`;
+                            const isKeywordExpanded = expandedSearchKeywords[keywordKey] || false;
+                            const totalPrompts = Object.values(collections).reduce((sum, prompts) => sum + prompts.length, 0);
+                            
+                            return (
+                              <div key={keyword} className="border border-gray-200 rounded-lg overflow-hidden">
+                                <button
+                                  onClick={() => setExpandedSearchKeywords(prev => ({ ...prev, [keywordKey]: !prev[keywordKey] }))}
+                                  className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <svg
+                                      className={`w-5 h-5 text-gray-600 transition-transform ${isKeywordExpanded ? 'rotate-90' : ''}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    <span className="font-semibold text-gray-900">{keyword}</span>
+                                    <span className="text-sm text-gray-600">({totalPrompts} prompts)</span>
+                                  </div>
+                                </button>
+                                
+                                {isKeywordExpanded && (
+                                  <div className="bg-white">
+                                    {Object.entries(collections).map(([collection, prompts]) => {
+                                      const collectionKey = `${keywordKey}-collection-${collection}`;
+                                      const isCollectionExpanded = expandedSearchCollections[collectionKey] || false;
+                                      
+                                      return (
+                                        <div key={collection} className="border-t border-gray-200">
+                                          <button
+                                            onClick={() => setExpandedSearchCollections(prev => ({ ...prev, [collectionKey]: !prev[collectionKey] }))}
+                                            className="w-full flex items-center justify-between px-6 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              <svg
+                                                className={`w-4 h-4 text-gray-600 transition-transform ${isCollectionExpanded ? 'rotate-90' : ''}`}
+                                                fill="none"
+                                                stroke="currentColor"
+                                                viewBox="0 0 24 24"
+                                              >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                              </svg>
+                                              <span className="font-medium text-gray-900">{collection}</span>
+                                              <span className="text-sm text-gray-600">({prompts.length} prompts)</span>
+                                            </div>
+                                          </button>
+                                          
+                                          {isCollectionExpanded && (
+                                            <div className="px-6 py-3 space-y-2 max-h-96 overflow-y-auto">
+                                              {prompts.map((result, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="p-3 bg-white border border-gray-200 rounded-lg text-sm"
+                                                >
+                                                  <div className="flex items-center gap-2 mb-1">
+                                                    <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+                                                      Score: {(result.similarityScore * 100).toFixed(1)}%
+                                                    </span>
+                                                  </div>
+                                                  <p className="text-gray-900 mt-1">{result.first_prompt}</p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
                       )}
             
