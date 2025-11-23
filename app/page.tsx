@@ -275,6 +275,19 @@ Important: Output ONLY your selections in the format above, nothing else.`);
     setError(null);
     setLoading(true);
 
+    // Clear search results and reset selected keywords for entries being investigated
+    const entriesToClear = new Set(validEntries.map(e => e.id));
+    setSearchResults(prev => {
+      const cleared: { [key: string]: SearchResult[] } = {};
+      Object.keys(prev).forEach(key => {
+        const [entryId] = key.split('-');
+        if (!entriesToClear.has(entryId)) {
+          cleared[key] = prev[key];
+        }
+      });
+      return cleared;
+    });
+
     // Process all websites in parallel
     const investigationPromises = validEntries.map(async (entry) => {
       updateWebsiteEntry(entry.id, { isProcessing: true, error: null });
@@ -435,6 +448,7 @@ Important: Output ONLY your selections in the format above, nothing else.`);
   };
 
   // Initialize all keywords as selected when investigation results are available
+  // This runs whenever investigation results change, ensuring fresh keywords are selected
   useEffect(() => {
     const newSelectedKeywords: { [key: string]: string[] } = {};
     
@@ -442,28 +456,53 @@ Important: Output ONLY your selections in the format above, nothing else.`);
       if (entry.investigationResults) {
         if (entry.investigationResults.perplexity && !entry.investigationResults.perplexity.error) {
           const key = `${entry.id}-perplexity`;
-          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
-            newSelectedKeywords[key] = entry.investigationResults.perplexity.keywords.map(kw => kw.keyword);
-          }
+          const currentKeywords = entry.investigationResults.perplexity.keywords.map(kw => kw.keyword);
+          // Always set to current keywords from investigation results (fresh results)
+          newSelectedKeywords[key] = currentKeywords;
         }
         if (entry.investigationResults.gpt && !entry.investigationResults.gpt.error) {
           const key = `${entry.id}-gpt`;
-          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
-            newSelectedKeywords[key] = entry.investigationResults.gpt.keywords.map(kw => kw.keyword);
-          }
+          const currentKeywords = entry.investigationResults.gpt.keywords.map(kw => kw.keyword);
+          // Always set to current keywords from investigation results (fresh results)
+          newSelectedKeywords[key] = currentKeywords;
         }
         if (entry.investigationResults.gemini && !entry.investigationResults.gemini.error) {
           const key = `${entry.id}-gemini`;
-          if (!selectedKeywords[key] || selectedKeywords[key].length === 0) {
-            newSelectedKeywords[key] = entry.investigationResults.gemini.keywords.map(kw => kw.keyword);
-          }
+          const currentKeywords = entry.investigationResults.gemini.keywords.map(kw => kw.keyword);
+          // Always set to current keywords from investigation results (fresh results)
+          newSelectedKeywords[key] = currentKeywords;
         }
+      } else {
+        // If investigation results are cleared, also clear selected keywords for this entry
+        ['perplexity', 'gpt', 'gemini'].forEach(model => {
+          const key = `${entry.id}-${model}`;
+          // Clear the key by not including it in newSelectedKeywords
+          // We'll handle removal separately
+        });
       }
     });
 
-    if (Object.keys(newSelectedKeywords).length > 0) {
-      setSelectedKeywords(prev => ({ ...prev, ...newSelectedKeywords }));
-    }
+    // Update selected keywords - replace with fresh keywords from investigation results
+    setSelectedKeywords(prev => {
+      const updated = { ...prev };
+      
+      // First, remove keys for entries that no longer have investigation results
+      websiteEntries.forEach(entry => {
+        if (!entry.investigationResults) {
+          ['perplexity', 'gpt', 'gemini'].forEach(model => {
+            const key = `${entry.id}-${model}`;
+            delete updated[key];
+          });
+        }
+      });
+      
+      // Then, update with new keywords from investigation results
+      Object.keys(newSelectedKeywords).forEach(key => {
+        updated[key] = newSelectedKeywords[key];
+      });
+      
+      return updated;
+    });
   }, [websiteEntries]);
 
   return (
