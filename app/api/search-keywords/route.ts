@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     }
 
     const numCandidates = 600; // For 200 results, we need more candidates
-    const initialLimit = 400; // Get more initially to filter down
+    const initialLimit = 200; // Get more initially to filter down
 
     // Collection configurations
     const collectionConfigs = [

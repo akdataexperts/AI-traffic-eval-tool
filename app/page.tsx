@@ -114,6 +114,11 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState<{ [key: string]: boolean }>({});
   const [expandedSearchKeywords, setExpandedSearchKeywords] = useState<{ [key: string]: boolean }>({});
   const [expandedSearchCollections, setExpandedSearchCollections] = useState<{ [key: string]: boolean }>({});
+  const [bronzeFilteringResults, setBronzeFilteringResults] = useState<{ [key: string]: { perplexity?: any; gpt?: any; gemini?: any } }>({});
+  const [isBronzeFiltering, setIsBronzeFiltering] = useState<{ [key: string]: boolean }>({});
+  const [activeBronzeTab, setActiveBronzeTab] = useState<{ [key: string]: string }>({});
+  const [bronzeFilteringPrompts, setBronzeFilteringPrompts] = useState<{ [key: string]: string }>({});
+  const [selectedBronzeResponse, setSelectedBronzeResponse] = useState<{ [key: string]: string | null }>({});
   const [investigationPrompt, setInvestigationPrompt] = useState(`Prohibited:
 No sentences
 No explanations
@@ -445,6 +450,64 @@ Important: Output ONLY your selections in the format above, nothing else.`);
         return { ...prev, [key]: [...current, keyword] };
       }
     });
+  };
+
+  const handleBronzeFilteringStage1 = async (entryId: string) => {
+    const entry = websiteEntries.find(e => e.id === entryId);
+    if (!entry || !entry.url.trim()) {
+      setError('Please enter a website URL first');
+      return;
+    }
+
+    const bronzeKey = `${entryId}`;
+    setIsBronzeFiltering(prev => ({ ...prev, [bronzeKey]: true }));
+    setError(null);
+
+    // Get the prompt for this entry, or use default
+    const defaultPrompt = `Go online to {domainName} and analyze the website to provide the following information:
+
+1. Ideal Customer Profile: Is this a B2B (Business-to-Business) or B2C (Business-to-Consumer) company?
+2. Industry: What industry or industries does this company operate in?
+3. Country: What is the primary country or countries where this company operates or serves customers?
+
+Provide your analysis in a clear, structured format.`;
+    
+    const promptToUse = bronzeFilteringPrompts[bronzeKey] || defaultPrompt;
+
+    try {
+      const response = await fetch('/api/bronze-filtering-stage1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          website_url: entry.url,
+          custom_prompt: promptToUse !== defaultPrompt ? promptToUse : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Bronze filtering failed');
+      }
+
+      const data = await response.json();
+      setBronzeFilteringResults(prev => ({ ...prev, [bronzeKey]: data }));
+      
+      // Set default active tab to first available model
+      if (!activeBronzeTab[bronzeKey]) {
+        if (data.perplexity && !data.perplexity.error) {
+          setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'perplexity' }));
+        } else if (data.gpt && !data.gpt.error) {
+          setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gpt' }));
+        } else if (data.gemini && !data.gemini.error) {
+          setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gemini' }));
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to get additional website info');
+      setBronzeFilteringResults(prev => ({ ...prev, [bronzeKey]: {} }));
+    } finally {
+      setIsBronzeFiltering(prev => ({ ...prev, [bronzeKey]: false }));
+    }
   };
 
   // Initialize all keywords as selected when investigation results are available
@@ -1229,6 +1292,233 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     );
                   })()}
                 </div>
+                
+                {/* Bronze Filtering Section */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Bronze Filtering</h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Get additional information about the website (Ideal Customer Profile - B2B/B2C, Industry, Country) from all three LLMs.
+                  </p>
+                  
+                  {/* Editable Prompt */}
+                  <div className="mb-4">
+                    <label htmlFor={`bronze-prompt-${entry.id}`} className="block text-sm font-medium text-gray-700 mb-2">
+                      Prompt (Editable)
+                    </label>
+                    <textarea
+                      id={`bronze-prompt-${entry.id}`}
+                      value={bronzeFilteringPrompts[entry.id] || `Go online to {domainName} and analyze the website to provide the following information:
+
+1. Ideal Customer Profile: Is this a B2B (Business-to-Business) or B2C (Business-to-Consumer) company?
+2. Industry: What industry or industries does this company operate in?
+3. Country: What is the primary country or countries where this company operates or serves customers?
+
+Provide your analysis in a clear, structured format.`}
+                      onChange={(e) => setBronzeFilteringPrompts(prev => ({ ...prev, [entry.id]: e.target.value }))}
+                      rows={8}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-sm text-gray-900"
+                      placeholder="Enter prompt for bronze filtering stage 1. Use {domainName} and {baseDomain} as placeholders."
+                      disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={() => handleBronzeFilteringStage1(entry.id)}
+                    disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isBronzeFiltering[entry.id] ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Getting Info...
+                      </>
+                    ) : (
+                      'Get Additional Website Info (Stage 1)'
+                    )}
+                  </button>
+                  
+                  {/* Bronze Filtering Results */}
+                  {bronzeFilteringResults[entry.id] && Object.keys(bronzeFilteringResults[entry.id]).length > 0 && (() => {
+                    const bronzeResults = bronzeFilteringResults[entry.id];
+                    const bronzeKey = entry.id;
+                    const activeBronzeTabKey = activeBronzeTab[bronzeKey] || 'perplexity';
+                    
+                    return (
+                      <div className="mt-4">
+                        {/* Model Tabs */}
+                        <div className="mb-4 border-b border-gray-200">
+                          <div className="flex gap-4">
+                            {bronzeResults.perplexity && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'perplexity'
+                                    ? 'border-blue-600 text-blue-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.perplexity.model_name || 'Perplexity Sonar'}
+                              </button>
+                            )}
+                            {bronzeResults.gpt && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gpt'
+                                    ? 'border-green-600 text-green-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gpt.model_name || 'GPT'}
+                              </button>
+                            )}
+                            {bronzeResults.gemini && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gemini'
+                                    ? 'border-purple-600 text-purple-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gemini.model_name || 'Gemini'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Display Active Tab Content */}
+                        {activeBronzeTabKey === 'perplexity' && bronzeResults.perplexity && (
+                          <div className="p-4 border border-blue-200 rounded-lg bg-blue-50/30">
+                            {bronzeResults.perplexity.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.perplexity.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.perplexity.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gpt' && bronzeResults.gpt && (
+                          <div className="p-4 border border-green-200 rounded-lg bg-green-50/30">
+                            {bronzeResults.gpt.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gpt.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gpt.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gemini' && bronzeResults.gemini && (
+                          <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/30">
+                            {bronzeResults.gemini.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gemini.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gemini.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Response Selection for Next Step */}
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                          <h5 className="text-md font-semibold text-gray-900 mb-3">Select Response for Next Step</h5>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Choose which LLM response you want to use for the ranking and filtering step:
+                          </p>
+                          <div className="space-y-2">
+                            {bronzeResults.perplexity && !bronzeResults.perplexity.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="perplexity"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'perplexity'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                  className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.perplexity.model_name || 'Perplexity Sonar'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.perplexity.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gpt && !bronzeResults.gpt.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gpt"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gpt'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                  className="w-4 h-4 text-green-600 focus:ring-green-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gpt.model_name || 'GPT'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gpt.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gemini && !bronzeResults.gemini.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gemini"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gemini'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gemini.model_name || 'Gemini'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gemini.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                          </div>
+                          {selectedBronzeResponse[bronzeKey] && (
+                            <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                              <p className="text-sm text-indigo-900">
+                                <span className="font-semibold">Selected:</span> {bronzeResults[selectedBronzeResponse[bronzeKey] as keyof typeof bronzeResults]?.model_name || selectedBronzeResponse[bronzeKey]}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
                       )}
                       {activeTab === 'gpt' && investigationResults.gpt && !investigationResults.gpt.error && (
@@ -1645,6 +1935,233 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                     );
                   })()}
                 </div>
+                
+                {/* Bronze Filtering Section */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Bronze Filtering</h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Get additional information about the website (Ideal Customer Profile - B2B/B2C, Industry, Country) from all three LLMs.
+                  </p>
+                  
+                  {/* Editable Prompt */}
+                  <div className="mb-4">
+                    <label htmlFor={`bronze-prompt-gpt-${entry.id}`} className="block text-sm font-medium text-gray-700 mb-2">
+                      Prompt (Editable)
+                    </label>
+                    <textarea
+                      id={`bronze-prompt-gpt-${entry.id}`}
+                      value={bronzeFilteringPrompts[entry.id] || `Go online to {domainName} and analyze the website to provide the following information:
+
+1. Ideal Customer Profile: Is this a B2B (Business-to-Business) or B2C (Business-to-Consumer) company?
+2. Industry: What industry or industries does this company operate in?
+3. Country: What is the primary country or countries where this company operates or serves customers?
+
+Provide your analysis in a clear, structured format.`}
+                      onChange={(e) => setBronzeFilteringPrompts(prev => ({ ...prev, [entry.id]: e.target.value }))}
+                      rows={8}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-sm text-gray-900"
+                      placeholder="Enter prompt for bronze filtering stage 1. Use {domainName} and {baseDomain} as placeholders."
+                      disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={() => handleBronzeFilteringStage1(entry.id)}
+                    disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isBronzeFiltering[entry.id] ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Getting Info...
+                      </>
+                    ) : (
+                      'Get Additional Website Info (Stage 1)'
+                    )}
+                  </button>
+                  
+                  {/* Bronze Filtering Results */}
+                  {bronzeFilteringResults[entry.id] && Object.keys(bronzeFilteringResults[entry.id]).length > 0 && (() => {
+                    const bronzeResults = bronzeFilteringResults[entry.id];
+                    const bronzeKey = entry.id;
+                    const activeBronzeTabKey = activeBronzeTab[bronzeKey] || 'perplexity';
+                    
+                    return (
+                      <div className="mt-4">
+                        {/* Model Tabs */}
+                        <div className="mb-4 border-b border-gray-200">
+                          <div className="flex gap-4">
+                            {bronzeResults.perplexity && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'perplexity'
+                                    ? 'border-blue-600 text-blue-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.perplexity.model_name || 'Perplexity Sonar'}
+                              </button>
+                            )}
+                            {bronzeResults.gpt && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gpt'
+                                    ? 'border-green-600 text-green-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gpt.model_name || 'GPT'}
+                              </button>
+                            )}
+                            {bronzeResults.gemini && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gemini'
+                                    ? 'border-purple-600 text-purple-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gemini.model_name || 'Gemini'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Display Active Tab Content */}
+                        {activeBronzeTabKey === 'perplexity' && bronzeResults.perplexity && (
+                          <div className="p-4 border border-blue-200 rounded-lg bg-blue-50/30">
+                            {bronzeResults.perplexity.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.perplexity.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.perplexity.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gpt' && bronzeResults.gpt && (
+                          <div className="p-4 border border-green-200 rounded-lg bg-green-50/30">
+                            {bronzeResults.gpt.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gpt.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gpt.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gemini' && bronzeResults.gemini && (
+                          <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/30">
+                            {bronzeResults.gemini.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gemini.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gemini.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Response Selection for Next Step */}
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                          <h5 className="text-md font-semibold text-gray-900 mb-3">Select Response for Next Step</h5>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Choose which LLM response you want to use for the ranking and filtering step:
+                          </p>
+                          <div className="space-y-2">
+                            {bronzeResults.perplexity && !bronzeResults.perplexity.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="perplexity"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'perplexity'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                  className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.perplexity.model_name || 'Perplexity Sonar'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.perplexity.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gpt && !bronzeResults.gpt.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gpt"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gpt'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                  className="w-4 h-4 text-green-600 focus:ring-green-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gpt.model_name || 'GPT'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gpt.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gemini && !bronzeResults.gemini.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gemini"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gemini'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gemini.model_name || 'Gemini'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gemini.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                          </div>
+                          {selectedBronzeResponse[bronzeKey] && (
+                            <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                              <p className="text-sm text-indigo-900">
+                                <span className="font-semibold">Selected:</span> {bronzeResults[selectedBronzeResponse[bronzeKey] as keyof typeof bronzeResults]?.model_name || selectedBronzeResponse[bronzeKey]}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
                       )}
                       {activeTab === 'gemini' && investigationResults.gemini && !investigationResults.gemini.error && (
@@ -2056,6 +2573,233 @@ Important: Output ONLY your selections in the format above, nothing else.`);
                               </div>
                             );
                           })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+                
+                {/* Bronze Filtering Section */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-3">Bronze Filtering</h4>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Get additional information about the website (Ideal Customer Profile - B2B/B2C, Industry, Country) from all three LLMs.
+                  </p>
+                  
+                  {/* Editable Prompt */}
+                  <div className="mb-4">
+                    <label htmlFor={`bronze-prompt-gemini-${entry.id}`} className="block text-sm font-medium text-gray-700 mb-2">
+                      Prompt (Editable)
+                    </label>
+                    <textarea
+                      id={`bronze-prompt-gemini-${entry.id}`}
+                      value={bronzeFilteringPrompts[entry.id] || `Go online to {domainName} and analyze the website to provide the following information:
+
+1. Ideal Customer Profile: Is this a B2B (Business-to-Business) or B2C (Business-to-Consumer) company?
+2. Industry: What industry or industries does this company operate in?
+3. Country: What is the primary country or countries where this company operates or serves customers?
+
+Provide your analysis in a clear, structured format.`}
+                      onChange={(e) => setBronzeFilteringPrompts(prev => ({ ...prev, [entry.id]: e.target.value }))}
+                      rows={8}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono text-sm text-gray-900"
+                      placeholder="Enter prompt for bronze filtering stage 1. Use {domainName} and {baseDomain} as placeholders."
+                      disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    />
+                    <p className="text-xs text-gray-500 mt-2">
+                      Use <code className="bg-gray-100 px-1 rounded">{"{domainName}"}</code> and <code className="bg-gray-100 px-1 rounded">{"{baseDomain}"}</code> as placeholders.
+                    </p>
+                  </div>
+                  
+                  <button
+                    onClick={() => handleBronzeFilteringStage1(entry.id)}
+                    disabled={isBronzeFiltering[entry.id] || entry.isProcessing}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isBronzeFiltering[entry.id] ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Getting Info...
+                      </>
+                    ) : (
+                      'Get Additional Website Info (Stage 1)'
+                    )}
+                  </button>
+                  
+                  {/* Bronze Filtering Results */}
+                  {bronzeFilteringResults[entry.id] && Object.keys(bronzeFilteringResults[entry.id]).length > 0 && (() => {
+                    const bronzeResults = bronzeFilteringResults[entry.id];
+                    const bronzeKey = entry.id;
+                    const activeBronzeTabKey = activeBronzeTab[bronzeKey] || 'perplexity';
+                    
+                    return (
+                      <div className="mt-4">
+                        {/* Model Tabs */}
+                        <div className="mb-4 border-b border-gray-200">
+                          <div className="flex gap-4">
+                            {bronzeResults.perplexity && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'perplexity'
+                                    ? 'border-blue-600 text-blue-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.perplexity.model_name || 'Perplexity Sonar'}
+                              </button>
+                            )}
+                            {bronzeResults.gpt && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gpt'
+                                    ? 'border-green-600 text-green-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gpt.model_name || 'GPT'}
+                              </button>
+                            )}
+                            {bronzeResults.gemini && (
+                              <button
+                                onClick={() => setActiveBronzeTab(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                className={`px-4 py-2 border-b-2 font-semibold transition-colors ${
+                                  activeBronzeTabKey === 'gemini'
+                                    ? 'border-purple-600 text-purple-600'
+                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                }`}
+                              >
+                                {bronzeResults.gemini.model_name || 'Gemini'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Display Active Tab Content */}
+                        {activeBronzeTabKey === 'perplexity' && bronzeResults.perplexity && (
+                          <div className="p-4 border border-blue-200 rounded-lg bg-blue-50/30">
+                            {bronzeResults.perplexity.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.perplexity.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.perplexity.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gpt' && bronzeResults.gpt && (
+                          <div className="p-4 border border-green-200 rounded-lg bg-green-50/30">
+                            {bronzeResults.gpt.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gpt.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gpt.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {activeBronzeTabKey === 'gemini' && bronzeResults.gemini && (
+                          <div className="p-4 border border-purple-200 rounded-lg bg-purple-50/30">
+                            {bronzeResults.gemini.error ? (
+                              <div className="text-red-700">
+                                <p className="font-semibold mb-2">Error:</p>
+                                <p>{bronzeResults.gemini.error}</p>
+                              </div>
+                            ) : (
+                              <div>
+                                <h5 className="text-sm font-semibold text-gray-700 mb-2">Response:</h5>
+                                <pre className="text-sm text-gray-900 whitespace-pre-wrap bg-white p-3 rounded border border-gray-200">
+                                  {bronzeResults.gemini.response}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Response Selection for Next Step */}
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                          <h5 className="text-md font-semibold text-gray-900 mb-3">Select Response for Next Step</h5>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Choose which LLM response you want to use for the ranking and filtering step:
+                          </p>
+                          <div className="space-y-2">
+                            {bronzeResults.perplexity && !bronzeResults.perplexity.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="perplexity"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'perplexity'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'perplexity' }))}
+                                  className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.perplexity.model_name || 'Perplexity Sonar'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.perplexity.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gpt && !bronzeResults.gpt.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gpt"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gpt'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gpt' }))}
+                                  className="w-4 h-4 text-green-600 focus:ring-green-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gpt.model_name || 'GPT'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gpt.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                            {bronzeResults.gemini && !bronzeResults.gemini.error && (
+                              <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+                                <input
+                                  type="radio"
+                                  name={`bronze-selection-${bronzeKey}`}
+                                  value="gemini"
+                                  checked={selectedBronzeResponse[bronzeKey] === 'gemini'}
+                                  onChange={() => setSelectedBronzeResponse(prev => ({ ...prev, [bronzeKey]: 'gemini' }))}
+                                  className="w-4 h-4 text-purple-600 focus:ring-purple-500"
+                                />
+                                <div className="flex-1">
+                                  <span className="font-medium text-gray-900">{bronzeResults.gemini.model_name || 'Gemini'}</span>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    {bronzeResults.gemini.response.substring(0, 100)}...
+                                  </p>
+                                </div>
+                              </label>
+                            )}
+                          </div>
+                          {selectedBronzeResponse[bronzeKey] && (
+                            <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                              <p className="text-sm text-indigo-900">
+                                <span className="font-semibold">Selected:</span> {bronzeResults[selectedBronzeResponse[bronzeKey] as keyof typeof bronzeResults]?.model_name || selectedBronzeResponse[bronzeKey]}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
