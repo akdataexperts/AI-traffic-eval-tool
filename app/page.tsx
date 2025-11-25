@@ -1145,7 +1145,7 @@ Provide your analysis in a clear, structured format.`;
         setSelectedRankingLLM(prev => ({ ...prev, [bronzeKey]: 'gemini' }));
       }
     });
-  }, [selectedBronzeResponse, websiteEntries]);
+  }, [selectedBronzeResponse, websiteEntries, selectedRankingLLM]);
 
   return (
     <main className="min-h-screen p-8 bg-gradient-to-br from-gray-50 to-gray-100">
@@ -2352,7 +2352,7 @@ Provide your analysis in a clear, structured format.`;
                                   {entry.excelComparisonFiles.length === 0 ? (
                                     <div className="mb-4">
                                       <p className="text-sm text-gray-600 mb-3">
-                                        Select Excel files with "results" tab to compare ranking results with your Excel data.
+                                        Select Excel files with &quot;results&quot; tab to compare ranking results with your Excel data.
                                       </p>
                                       <input
                                         type="file"
@@ -3617,7 +3617,7 @@ Provide your analysis in a clear, structured format.`;
                                   {entry.excelComparisonFiles.length === 0 ? (
                                     <div className="mb-4">
                                       <p className="text-sm text-gray-600 mb-3">
-                                        Select Excel files with "results" tab to compare ranking results with your Excel data.
+                                        Select Excel files with &quot;results&quot; tab to compare ranking results with your Excel data.
                                       </p>
                                       <input
                                         type="file"
@@ -4882,7 +4882,7 @@ Provide your analysis in a clear, structured format.`;
                                   {entry.excelComparisonFiles.length === 0 ? (
                                     <div className="mb-4">
                                       <p className="text-sm text-gray-600 mb-3">
-                                        Select Excel files with "results" tab to compare ranking results with your Excel data.
+                                        Select Excel files with &quot;results&quot; tab to compare ranking results with your Excel data.
                                       </p>
                                       <input
                                         type="file"
