@@ -139,7 +139,7 @@ Important: Output ONLY the keywords separated by |, nothing else.`;
       }),
       
       // Gemini 2.5 Pro (Note: If Gemini 2.5 Pro is not available, adjust model name to available version)
-      geminiClient.getGenerativeModel({ model: 'gemini-2.0-flash-exp' }).generateContent(prompt).then(response => {
+      geminiClient.getGenerativeModel({ model: 'gemini-2.0-flash-lite' }).generateContent(prompt).then(response => {
         const text = response.response.text();
         if (!text) {
           throw new Error('Gemini returned empty response');
@@ -213,14 +213,14 @@ Important: Output ONLY the keywords separated by |, nothing else.`;
         results.gemini = {
           ...parsed,
           raw_response: geminiResponse.value,
-          model_name: 'gemini-2.0-flash-exp',
+          model_name: 'gemini-2.0-flash-lite',
         };
       } catch (error: any) {
         console.error(`[${new Date().toISOString()}] Error parsing Gemini response:`, error);
         results.gemini = { 
           error: error.message,
           raw_response: geminiResponse.value || 'No response received',
-          model_name: 'gemini-2.0-flash-exp',
+          model_name: 'gemini-2.0-flash-lite',
         };
       }
     } else {
@@ -228,7 +228,7 @@ Important: Output ONLY the keywords separated by |, nothing else.`;
       results.gemini = { 
         error: geminiResponse.reason?.message || 'Gemini request failed',
         raw_response: 'Request failed - no response received',
-        model_name: 'gemini-2.0-flash-exp',
+        model_name: 'gemini-2.0-flash-lite',
       };
     }
 

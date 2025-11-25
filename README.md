@@ -10,10 +10,7 @@ A standalone evaluation tool for the AI traffic feature functionality. This tool
   - Business type (B2B/B2C/B2B + B2C)
   - Top 10 pages
 
-- **Prompt Generation**: For each offering phrasing:
-  - Generates embeddings using HuggingFace
-  - Finds 100 similar prompts using MongoDB vector search
-  - Uses Gemini AI to select the top 3 most relevant prompts with reasoning
+- **Website Analysis**: Analyze websites and extract keywords for evaluation
 
 ## Setup
 
@@ -46,10 +43,7 @@ npm run dev
 
 1. Enter a website URL in the input field
 2. Click "Investigate" to analyze the website
-3. Review the investigation results (offerings, persona, pages)
-4. Optionally customize the Gemini prompt template
-5. Click "Generate Prompts" to find relevant prompts for each offering phrasing
-6. Review the selected prompts and Gemini's reasoning
+3. Review the investigation results (keywords, persona, pages)
 
 ## Project Structure
 
@@ -59,17 +53,20 @@ Eval tool/
 │   ├── api/
 │   │   ├── investigate/
 │   │   │   └── route.ts          # API route for website investigation
-│   │   └── generate-prompts/
-│   │       └── route.ts          # API route for prompt generation
+│   │   ├── bronze-filtering-stage1/
+│   │   │   └── route.ts          # API route for bronze filtering stage 1
+│   │   └── bronze-filtering-stage2/
+│   │       └── route.ts          # API route for bronze filtering stage 2
 │   ├── layout.tsx                 # Root layout
 │   ├── page.tsx                   # Main page component
 │   └── globals.css                # Global styles
 ├── lib/
 │   ├── perplexity.ts              # Perplexity AI client
 │   ├── gemini.ts                  # Gemini AI client
-│   ├── gemini-helpers.ts          # Gemini prompt selection logic
+│   ├── gemini-helpers.ts          # Gemini helper functions
 │   ├── embeddings.ts              # HuggingFace embedding generation
-│   └── mongodb.ts                 # MongoDB connection and vector search
+│   ├── mongodb.ts                 # MongoDB connection and vector search
+│   └── openai.ts                  # OpenAI client
 └── package.json
 ```
 

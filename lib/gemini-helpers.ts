@@ -30,7 +30,7 @@ export async function selectTop3PromptsForOffering(
     }
 
     const client = getGeminiClient();
-    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
 
     // Limit to first 100 prompts
     const promptsList = candidatePrompts

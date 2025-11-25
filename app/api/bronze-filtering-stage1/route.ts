@@ -26,26 +26,15 @@ export async function POST(request: NextRequest) {
     const openAIClient = getOpenAIClient();
     const geminiClient = getGeminiClient();
 
-    const defaultPrompt = `Go online to {domainName} and analyze the website to provide the following information:
-
-1. Ideal Customer Profile: Is this a B2B (Business-to-Business) or B2C (Business-to-Consumer) company?
-2. Industry: What industry or industries does this company operate in?
-3. Country: What is the primary country or countries where this company operates or serves customers?
-
-Provide your analysis in a clear, structured format.`;
-
-    // Use custom prompt if provided, otherwise use default
-    // Replace placeholders in custom prompt
-    let processedCustomPrompt = custom_prompt;
-    if (processedCustomPrompt) {
-      processedCustomPrompt = processedCustomPrompt.replace(/\{domainName\}/g, domainName);
-      processedCustomPrompt = processedCustomPrompt.replace(/\{baseDomain\}/g, normalizedUrl);
+    // The prompt is always sent from the frontend (even if it's the default)
+    // Replace placeholders in the prompt
+    if (!custom_prompt) {
+      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
     
-    // Replace placeholders in default prompt
-    const defaultPromptWithReplacements = defaultPrompt.replace(/\{domainName\}/g, domainName).replace(/\{baseDomain\}/g, normalizedUrl);
-
-    const prompt = processedCustomPrompt || defaultPromptWithReplacements;
+    const prompt = custom_prompt
+      .replace(/\{domainName\}/g, domainName)
+      .replace(/\{baseDomain\}/g, normalizedUrl);
 
     // Call all three models in parallel
     console.log(`[${new Date().toISOString()}] Sending bronze filtering stage 1 requests to all three models in parallel`);
@@ -79,7 +68,7 @@ Provide your analysis in a clear, structured format.`;
       }),
       
       // Gemini
-      geminiClient.getGenerativeModel({ model: 'gemini-2.0-flash-exp' }).generateContent(prompt).then(response => {
+      geminiClient.getGenerativeModel({ model: 'gemini-2.0-flash-lite' }).generateContent(prompt).then(response => {
         const text = response.response.text();
         if (!text) {
           throw new Error('Gemini returned empty response');
@@ -126,13 +115,13 @@ Provide your analysis in a clear, structured format.`;
     if (geminiResponse.status === 'fulfilled') {
       results.gemini = {
         response: geminiResponse.value,
-        model_name: 'gemini-2.0-flash-exp',
+        model_name: 'gemini-2.0-flash-lite',
       };
     } else {
       console.error(`[${new Date().toISOString()}] Gemini request failed:`, geminiResponse.reason);
       results.gemini = { 
         error: geminiResponse.reason?.message || 'Gemini request failed',
-        model_name: 'gemini-2.0-flash-exp',
+        model_name: 'gemini-2.0-flash-lite',
       };
     }
 

@@ -12,7 +12,7 @@ interface SearchResult {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { keywords }: { keywords: string[] } = body;
+    const { keywords, limit, numCandidates }: { keywords: string[]; limit?: number; numCandidates?: number } = body;
 
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       return NextResponse.json(
@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const numCandidates = 600; // For 200 results, we need more candidates
-    const initialLimit = 200; // Get more initially to filter down
+    const searchNumCandidates = numCandidates || 3000; // Default: 3000 candidates
+    const searchLimit = limit || 1000; // Default: 1000 results per keyword
 
     // Collection configurations
     const collectionConfigs = [
@@ -65,8 +65,8 @@ export async function POST(request: NextRequest) {
               index: 'first_prompt_vector_index',
               path: 'first_prompt_vector',
               queryVector: embedding,
-              numCandidates: numCandidates,
-              limit: initialLimit,
+              numCandidates: searchNumCandidates,
+              limit: searchLimit,
             },
           },
           {
@@ -112,9 +112,9 @@ export async function POST(request: NextRequest) {
       return Promise.all(collectionSearchPromises).then(collectionResults => {
         // Flatten results from all collections
         const allKeywordResults = collectionResults.flat();
-        // Sort by similarity score (descending) and limit to 200 per keyword
+        // Sort by similarity score (descending) and limit to searchLimit per keyword
         allKeywordResults.sort((a, b) => b.similarityScore - a.similarityScore);
-        return allKeywordResults.slice(0, 200);
+        return allKeywordResults.slice(0, searchLimit);
       });
     });
 
@@ -125,9 +125,50 @@ export async function POST(request: NextRequest) {
     const allResults = allKeywordResults.flat();
     allResults.sort((a, b) => b.similarityScore - a.similarityScore);
 
+    // Deduplicate results based on first 100 characters of the prompt
+    // Normalize the prefix: lowercase, trim, and take first 100 chars
+    const normalizePrefix = (prompt: string): string => {
+      return prompt.substring(0, 100).trim().toLowerCase().replace(/\s+/g, ' ');
+    };
+
+    const seenPrefixes = new Map<string, { result: SearchResult; index: number }>();
+    const deduplicatedResults: SearchResult[] = [];
+
+    for (const result of allResults) {
+      const prefix = normalizePrefix(result.first_prompt);
+      
+      if (!seenPrefixes.has(prefix)) {
+        // First occurrence of this prefix - keep it
+        const index = deduplicatedResults.length;
+        deduplicatedResults.push(result);
+        seenPrefixes.set(prefix, { result, index });
+      } else {
+        // Duplicate found - keep the one with higher similarity score
+        const existing = seenPrefixes.get(prefix)!;
+        if (result.similarityScore > existing.result.similarityScore) {
+          // Replace with the higher-scoring duplicate
+          deduplicatedResults[existing.index] = result;
+          seenPrefixes.set(prefix, { result, index: existing.index });
+        }
+        // Otherwise, keep the existing one (already in deduplicatedResults)
+      }
+    }
+
+    // Verify no duplicates remain
+    const verificationPrefixes = new Set<string>();
+    for (const result of deduplicatedResults) {
+      const prefix = normalizePrefix(result.first_prompt);
+      if (verificationPrefixes.has(prefix)) {
+        console.warn(`[${new Date().toISOString()}] WARNING: Duplicate found after deduplication: ${prefix.substring(0, 50)}...`);
+      }
+      verificationPrefixes.add(prefix);
+    }
+
+    console.log(`[${new Date().toISOString()}] Deduplication: ${allResults.length} results → ${deduplicatedResults.length} unique results (removed ${allResults.length - deduplicatedResults.length} duplicates)`);
+
     return NextResponse.json({
-      results: allResults,
-      total: allResults.length,
+      results: deduplicatedResults,
+      total: deduplicatedResults.length,
     });
   } catch (error: any) {
     console.error('Error in search-keywords API:', error);
