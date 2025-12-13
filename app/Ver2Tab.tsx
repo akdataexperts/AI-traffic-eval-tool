@@ -953,7 +953,7 @@ export default function Ver2Tab() {
             <p className="font-semibold mb-1">Tips:</p>
             <ul className="list-disc list-inside space-y-0.5 text-xs">
               <li>Edit prompts before running stages (shared across domains)</li>
-              <li>Add multiple domains with "+ Add Domain"</li>
+              <li>Add multiple domains with &quot;+ Add Domain&quot;</li>
               <li>All domains are processed in parallel</li>
             </ul>
           </div>
