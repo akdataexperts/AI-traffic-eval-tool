@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import Ver2Tab from './Ver2Tab';
 
 interface InvestigationData {
   keywords: Array<{
@@ -126,6 +127,9 @@ interface WebsiteEntry {
 }
 
 export default function Home() {
+  // Tab state for switching between ver1 and ver2
+  const [activeMainTab, setActiveMainTab] = useState<'ver1' | 'ver2'>('ver1');
+  
   const [websiteEntries, setWebsiteEntries] = useState<WebsiteEntry[]>([
     { id: '1', url: '', excelFiles: [], excelComparisonFiles: [], keywords: [], investigationResults: null, similarityResults: null, isProcessing: false, error: null }
   ]);
@@ -1150,8 +1154,38 @@ Provide your analysis in a clear, structured format.`;
   return (
     <main className="min-h-screen p-8 bg-gradient-to-br from-gray-50 to-gray-100">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold text-gray-900 mb-8">AI Traffic Eval Tool</h1>
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">AI Traffic Eval Tool</h1>
 
+        {/* Main Tab Navigation */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setActiveMainTab('ver1')}
+            className={`px-6 py-3 rounded-t-lg font-semibold transition-all ${
+              activeMainTab === 'ver1'
+                ? 'bg-white text-blue-600 border-t-2 border-l-2 border-r-2 border-blue-600'
+                : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            }`}
+          >
+            Ver1 - Keyword Evaluation
+          </button>
+          <button
+            onClick={() => setActiveMainTab('ver2')}
+            className={`px-6 py-3 rounded-t-lg font-semibold transition-all ${
+              activeMainTab === 'ver2'
+                ? 'bg-white text-purple-600 border-t-2 border-l-2 border-r-2 border-purple-600'
+                : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            }`}
+          >
+            Ver2 - GPT Traffic Preview Workflow
+          </button>
+        </div>
+
+        {/* Ver2 Content */}
+        {activeMainTab === 'ver2' && <Ver2Tab />}
+
+        {/* Ver1 Content - Original functionality */}
+        {activeMainTab === 'ver1' && (
+          <>
         {/* Investigation Prompt Editor */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
           <label htmlFor="investigation-prompt" className="block text-sm font-medium text-gray-700 mb-2">
@@ -5379,6 +5413,8 @@ Provide your analysis in a clear, structured format.`;
               {/* Preview functionality removed - can be re-added per website entry if needed */}
             </div>
           </div>
+        )}
+          </>
         )}
 
         {loading && (

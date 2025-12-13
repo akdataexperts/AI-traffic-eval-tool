@@ -23,39 +23,18 @@ export async function POST(request: NextRequest) {
 
     console.log(`[${new Date().toISOString()}] Investigating offerings for: ${domainName} using all three models`);
 
+    if (!custom_prompt) {
+      return NextResponse.json({ error: 'Custom prompt is required' }, { status: 400 });
+    }
+
     const perplexityClient = getPerplexityClient();
     const openAIClient = getOpenAIClient();
     const geminiClient = getGeminiClient();
 
-    const defaultPrompt = `Go online to {domainName} and investigate what they do.
-
-Based on your research, provide:
-1. what are problems solved by {domainName} & what are the solutions offered by {domainName} 
-
-Make sure you mention key aspects of the offering and the relevant industry and how it differs from others
-
-more keywords for more specific answers
-
-final list should be a list 5 best combination of 2 to 5 keywords.
-
-Example format:
-
-data security challenges | enterprise encryption solutions | performance bottlenecks | cloud infrastructure services| budget overruns | budget management software
-
-Important: Output ONLY the keywords separated by |, nothing else.`;
-
-    // Use custom prompt if provided, otherwise use default
     // Replace placeholders in custom prompt
-    let processedCustomPrompt = custom_prompt;
-    if (processedCustomPrompt) {
-      processedCustomPrompt = processedCustomPrompt.replace(/\{domainName\}/g, domainName);
-      processedCustomPrompt = processedCustomPrompt.replace(/\{baseDomain\}/g, baseDomain);
-    }
-    
-    // Replace placeholders in default prompt
-    const defaultPromptWithReplacements = defaultPrompt.replace(/\{domainName\}/g, domainName).replace(/\{baseDomain\}/g, baseDomain);
-
-    const prompt = processedCustomPrompt || defaultPromptWithReplacements;
+    const prompt = custom_prompt
+      .replace(/\{domainName\}/g, domainName)
+      .replace(/\{baseDomain\}/g, baseDomain);
 
     // Helper function to parse model response
     const parseModelResponse = (content: string, modelName: string) => {
