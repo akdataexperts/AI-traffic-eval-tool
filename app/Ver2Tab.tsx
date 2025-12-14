@@ -212,25 +212,42 @@ const createEmptyResults = (): Ver2Results => ({
   stage6_grouped_prompts: null,
 });
 
+const ResultTextArea = ({ content, label, count }: { content: string; label?: string; count?: number }) => (
+  <div className="space-y-1">
+    {(label || count !== undefined) && (
+      <div className="flex justify-between text-xs text-gray-500">
+        {label && <span>{label}</span>}
+        {count !== undefined && <span>Count: {count}</span>}
+      </div>
+    )}
+    <textarea
+      readOnly
+      value={content}
+      rows={8}
+      className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-xs text-gray-900 resize-y"
+    />
+  </div>
+);
+
 export default function Ver2Tab() {
   // Domain URLs (simple list)
   const [domainUrls, setDomainUrls] = useState<string[]>(['']);
-  
+
   // Results per domain
   const [domainResults, setDomainResults] = useState<{ [url: string]: DomainResult }>({});
-  
+
   // Processing state
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProcessingStage, setCurrentProcessingStage] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Shared editable prompts
   const [stage1Prompt, setStage1Prompt] = useState(defaultStage1Prompt);
   const [stage2Prompt, setStage2Prompt] = useState(defaultStage2Prompt);
   const [stage4Prompt, setStage4Prompt] = useState(defaultStage4Prompt);
   const [stage5Prompt, setStage5Prompt] = useState(defaultStage5Prompt);
   const [stage6Prompt, setStage6Prompt] = useState(defaultStage6Prompt);
-  
+
   // UI state
   const [expandedStages, setExpandedStages] = useState<{ [key: number]: boolean }>({});
 
@@ -282,14 +299,14 @@ export default function Ver2Tab() {
       for (const url of Object.keys(newResults)) {
         const domainResult = { ...newResults[url] };
         const results = { ...domainResult.results };
-        
+
         if (fromStage <= 1) results.stage1_website_analysis = null;
         if (fromStage <= 2) results.stage2_descriptions = null;
         if (fromStage <= 3) results.stage3_similar_prompts = null;
         if (fromStage <= 4) results.stage4_selected_prompts = null;
         if (fromStage <= 5) results.stage5_filtered_prompts = null;
         if (fromStage <= 6) results.stage6_grouped_prompts = null;
-        
+
         domainResult.results = results;
         domainResult.currentStage = fromStage - 1;
         domainResult.error = null;
@@ -414,12 +431,12 @@ export default function Ver2Tab() {
     if (stageId === 1) return true;
     const validDomains = getValidDomains();
     if (validDomains.length === 0) return false;
-    
+
     // Check if at least one domain has the previous stage completed
     for (const url of validDomains) {
       const result = domainResults[url];
       if (!result) continue;
-      
+
       const prevStageCompleted = (() => {
         switch (stageId) {
           case 2: return !!result.results.stage1_website_analysis;
@@ -430,7 +447,7 @@ export default function Ver2Tab() {
           default: return false;
         }
       })();
-      
+
       if (prevStageCompleted) return true;
     }
     return false;
@@ -440,19 +457,19 @@ export default function Ver2Tab() {
   const getStageStatus = (stageId: number): 'pending' | 'processing' | 'partial' | 'completed' => {
     const validDomains = getValidDomains();
     if (validDomains.length === 0) return 'pending';
-    
+
     let completedCount = 0;
     let processingCount = 0;
-    
+
     for (const url of validDomains) {
       const result = domainResults[url];
       if (!result) continue;
-      
+
       if (result.isProcessing && result.currentStage >= stageId - 1) {
         processingCount++;
         continue;
       }
-      
+
       const stageCompleted = (() => {
         switch (stageId) {
           case 1: return !!result.results.stage1_website_analysis;
@@ -464,10 +481,10 @@ export default function Ver2Tab() {
           default: return false;
         }
       })();
-      
+
       if (stageCompleted) completedCount++;
     }
-    
+
     if (processingCount > 0) return 'processing';
     if (completedCount === validDomains.length && completedCount > 0) return 'completed';
     if (completedCount > 0) return 'partial';
@@ -478,25 +495,25 @@ export default function Ver2Tab() {
   const getResultsForStage = (stageId: number) => {
     const validDomains = getValidDomains();
     const results: { url: string; result: DomainResult }[] = [];
-    
+
     for (const url of validDomains) {
       const result = domainResults[url];
       if (result) {
         results.push({ url, result });
       }
     }
-    
+
     return results;
   };
 
   // Get the actual model used from results for a stage (from any domain that has results)
   const getActualModelForStage = (stageId: number): string | null => {
     const validDomains = getValidDomains();
-    
+
     for (const url of validDomains) {
       const result = domainResults[url];
       if (!result) continue;
-      
+
       switch (stageId) {
         case 1:
           if (result.results.stage1_website_analysis?.model) {
@@ -525,7 +542,7 @@ export default function Ver2Tab() {
           break;
       }
     }
-    
+
     return null;
   };
 
@@ -610,18 +627,16 @@ export default function Ver2Tab() {
             const status = getStageStatus(stage.id);
             return (
               <div key={stage.id} className="flex items-center">
-                <div className={`flex flex-col items-center p-2 rounded-lg border-2 min-w-[100px] ${
-                  status === 'completed' ? 'bg-green-100 border-green-500' :
+                <div className={`flex flex-col items-center p-2 rounded-lg border-2 min-w-[100px] ${status === 'completed' ? 'bg-green-100 border-green-500' :
                   status === 'processing' ? 'bg-purple-100 border-purple-500' :
-                  status === 'partial' ? 'bg-yellow-100 border-yellow-500' :
-                  'bg-white border-gray-200'
-                }`}>
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs mb-1 ${
-                    status === 'completed' ? 'bg-green-500 text-white' :
-                    status === 'processing' ? 'bg-purple-500 text-white animate-pulse' :
-                    status === 'partial' ? 'bg-yellow-500 text-white' :
-                    'bg-gray-300 text-gray-700'
+                    status === 'partial' ? 'bg-yellow-100 border-yellow-500' :
+                      'bg-white border-gray-200'
                   }`}>
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs mb-1 ${status === 'completed' ? 'bg-green-500 text-white' :
+                    status === 'processing' ? 'bg-purple-500 text-white animate-pulse' :
+                      status === 'partial' ? 'bg-yellow-500 text-white' :
+                        'bg-gray-300 text-gray-700'
+                    }`}>
                     {status === 'completed' ? '✓' : status === 'processing' ? '...' : stage.id}
                   </div>
                   <span className="text-[10px] font-semibold text-gray-700 text-center">{stage.name}</span>
@@ -643,25 +658,23 @@ export default function Ver2Tab() {
           const stageResults = getResultsForStage(stage.id);
           const actualModel = getActualModelForStage(stage.id);
           const displayModel = actualModel || stage.model;
-          
+
           return (
             <div key={stage.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
               {/* Stage Header */}
               <div
-                className={`p-4 cursor-pointer flex items-center justify-between ${
-                  status === 'completed' ? 'bg-green-50' :
+                className={`p-4 cursor-pointer flex items-center justify-between ${status === 'completed' ? 'bg-green-50' :
                   status === 'processing' ? 'bg-purple-50' :
-                  status === 'partial' ? 'bg-yellow-50' : 'bg-gray-50'
-                }`}
+                    status === 'partial' ? 'bg-yellow-50' : 'bg-gray-50'
+                  }`}
                 onClick={() => setExpandedStages(prev => ({ ...prev, [stage.id]: !prev[stage.id] }))}
               >
                 <div className="flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
-                    status === 'completed' ? 'bg-green-500 text-white' :
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${status === 'completed' ? 'bg-green-500 text-white' :
                     status === 'processing' ? 'bg-purple-500 text-white animate-pulse' :
-                    status === 'partial' ? 'bg-yellow-500 text-white' :
-                    'bg-gray-300 text-gray-700'
-                  }`}>
+                      status === 'partial' ? 'bg-yellow-500 text-white' :
+                        'bg-gray-300 text-gray-700'
+                    }`}>
                     {status === 'completed' ? '✓' : status === 'processing' ? '...' : stage.id}
                   </div>
                   <div>
@@ -669,14 +682,13 @@ export default function Ver2Tab() {
                     <p className="text-sm text-gray-600">{stage.description}</p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    actualModel ? 'bg-green-100 text-green-700' : stage.hasLLM ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                  }`} title={actualModel ? 'Actual model used in API call' : 'Expected model'}>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${actualModel ? 'bg-green-100 text-green-700' : stage.hasLLM ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                    }`} title={actualModel ? 'Actual model used in API call' : 'Expected model'}>
                     {displayModel}
                   </span>
-                  
+
                   {/* Run Stage button */}
                   <button
                     onClick={(e) => {
@@ -689,7 +701,7 @@ export default function Ver2Tab() {
                   >
                     Run Stage
                   </button>
-                  
+
                   {/* Run From Here button */}
                   {stage.id < 6 && (
                     <button
@@ -704,7 +716,7 @@ export default function Ver2Tab() {
                       Run → End
                     </button>
                   )}
-                  
+
                   <svg
                     className={`w-5 h-5 text-gray-500 transition-transform ${expandedStages[stage.id] ? 'rotate-180' : ''}`}
                     fill="none"
@@ -715,7 +727,7 @@ export default function Ver2Tab() {
                   </svg>
                 </div>
               </div>
-              
+
               {/* Stage Content */}
               {expandedStages[stage.id] && (
                 <div className="p-4 border-t border-gray-200">
@@ -733,7 +745,7 @@ export default function Ver2Tab() {
                         disabled={isProcessing}
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Placeholders: 
+                        Placeholders:
                         {stage.promptKey === 'stage1' && <code className="bg-gray-100 px-1 rounded ml-1">{"{domain_name}"}</code>}
                         {stage.promptKey === 'stage2' && <code className="bg-gray-100 px-1 rounded ml-1">{"{website_analysis}"}</code>}
                         {(stage.promptKey === 'stage4' || stage.promptKey === 'stage5' || stage.promptKey === 'stage6') && (
@@ -806,11 +818,10 @@ export default function Ver2Tab() {
                         if (!hasResult && !result.isProcessing && !result.error) return null;
 
                         return (
-                          <div key={url} className={`p-3 rounded-lg border ${
-                            result.error ? 'bg-red-50 border-red-200' :
+                          <div key={url} className={`p-3 rounded-lg border ${result.error ? 'bg-red-50 border-red-200' :
                             result.isProcessing ? 'bg-purple-50 border-purple-200' :
-                            hasResult ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
-                          }`}>
+                              hasResult ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                            }`}>
                             <div className="flex items-center gap-2 mb-2">
                               <span className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded text-xs font-mono">{url}</span>
                               {result.isProcessing && <span className="text-xs text-purple-600 animate-pulse">Processing...</span>}
@@ -819,85 +830,52 @@ export default function Ver2Tab() {
 
                             {/* Stage 1 Result */}
                             {stage.id === 1 && result.results.stage1_website_analysis && (
-                              <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono bg-white p-2 rounded border max-h-32 overflow-y-auto">
-                                {result.results.stage1_website_analysis.analysis}
-                              </pre>
+                              <ResultTextArea
+                                content={result.results.stage1_website_analysis.analysis}
+                              />
                             )}
 
                             {/* Stage 2 Result */}
                             {stage.id === 2 && result.results.stage2_descriptions && (
-                              <ul className="space-y-1">
-                                {result.results.stage2_descriptions.descriptions.map((desc, idx) => (
-                                  <li key={idx} className="flex items-center gap-2 text-xs">
-                                    <span className="w-4 h-4 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">{idx + 1}</span>
-                                    <span className="text-gray-900">{desc}</span>
-                                  </li>
-                                ))}
-                              </ul>
+                              <ResultTextArea
+                                content={result.results.stage2_descriptions.descriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n')}
+                                count={result.results.stage2_descriptions.descriptions.length}
+                              />
                             )}
 
                             {/* Stage 3 Result */}
                             {stage.id === 3 && result.results.stage3_similar_prompts && (
-                              <div>
-                                <p className="text-xs text-gray-600 mb-1">Found {result.results.stage3_similar_prompts.total} prompts</p>
-                                <div className="max-h-32 overflow-y-auto">
-                                  {result.results.stage3_similar_prompts.prompts.slice(0, 10).map((item, idx) => (
-                                    <div key={idx} className="text-xs text-gray-700 py-0.5 border-b border-gray-100">
-                                      {idx + 1}. {item.prompt.substring(0, 80)}...
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
+                              <ResultTextArea
+                                label={`Found ${result.results.stage3_similar_prompts.total} prompts`}
+                                content={result.results.stage3_similar_prompts.prompts.map((item, idx) => `${idx + 1}. ${item.prompt} [${(item.similarity * 100).toFixed(1)}%]`).join('\n')}
+                              />
                             )}
 
                             {/* Stage 4 Result */}
                             {stage.id === 4 && result.results.stage4_selected_prompts && (
-                              <div>
-                                <p className="text-xs text-gray-600 mb-1">Selected {result.results.stage4_selected_prompts.prompts.length} prompts</p>
-                                <div className="max-h-32 overflow-y-auto">
-                                  {result.results.stage4_selected_prompts.prompts.slice(0, 10).map((prompt, idx) => (
-                                    <div key={idx} className="text-xs text-gray-700 py-0.5 border-b border-gray-100">
-                                      {idx + 1}. {prompt.substring(0, 80)}...
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
+                              <ResultTextArea
+                                label={`Selected ${result.results.stage4_selected_prompts.prompts.length} prompts`}
+                                content={result.results.stage4_selected_prompts.prompts.map((prompt, idx) => `${idx + 1}. ${prompt}`).join('\n')}
+                              />
                             )}
 
                             {/* Stage 5 Result */}
                             {stage.id === 5 && result.results.stage5_filtered_prompts && (
-                              <div>
-                                <p className="text-xs text-gray-600 mb-1">Filtered to {result.results.stage5_filtered_prompts.prompts.length} prompts</p>
-                                <div className="max-h-32 overflow-y-auto">
-                                  {result.results.stage5_filtered_prompts.prompts.slice(0, 10).map((prompt, idx) => (
-                                    <div key={idx} className="text-xs text-gray-700 py-0.5 border-b border-gray-100">
-                                      {idx + 1}. {prompt.substring(0, 80)}...
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
+                              <ResultTextArea
+                                label={`Filtered to ${result.results.stage5_filtered_prompts.prompts.length} prompts`}
+                                content={result.results.stage5_filtered_prompts.prompts.map((prompt, idx) => `${idx + 1}. ${prompt}`).join('\n')}
+                              />
                             )}
 
                             {/* Stage 6 Result */}
                             {stage.id === 6 && result.results.stage6_grouped_prompts && (
-                              <div className="space-y-2">
-                                {result.results.stage6_grouped_prompts.groups.map((group, idx) => (
-                                  <div key={idx} className="p-2 bg-white rounded border">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-semibold">{group.group_name}</span>
-                                      <span className="text-xs text-gray-500">({group.prompts.length})</span>
-                                    </div>
-                                    <ul className="space-y-0.5">
-                                      {group.prompts.slice(0, 3).map((prompt, pIdx) => (
-                                        <li key={pIdx} className="text-xs text-gray-700">• {prompt.substring(0, 60)}...</li>
-                                      ))}
-                                      {group.prompts.length > 3 && (
-                                        <li className="text-xs text-gray-500 italic">... +{group.prompts.length - 3} more</li>
-                                      )}
-                                    </ul>
-                                  </div>
-                                ))}
-                              </div>
+                              <ResultTextArea
+                                label={`Groups: ${result.results.stage6_grouped_prompts.groups.length}`}
+                                content={result.results.stage6_grouped_prompts.groups.map(group =>
+                                  `[${group.group_name}] - ${group.description} (${group.prompts.length})\n` +
+                                  group.prompts.map(p => `- ${p}`).join('\n')
+                                ).join('\n\n')}
+                              />
                             )}
                           </div>
                         );
@@ -920,16 +898,16 @@ export default function Ver2Tab() {
                     })();
                     return !hasResult && !result.isProcessing;
                   }) && (
-                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-center">
-                      <p className="text-xs text-gray-500">
-                        {canRun 
-                          ? 'Click "Run Stage" to execute this stage, or "Run → End" to run from here to the end.'
-                          : getValidDomains().length === 0 
-                            ? 'Add domain URLs above to start.'
-                            : 'Complete previous stages first.'}
-                      </p>
-                    </div>
-                  )}
+                      <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-center">
+                        <p className="text-xs text-gray-500">
+                          {canRun
+                            ? 'Click "Run Stage" to execute this stage, or "Run → End" to run from here to the end.'
+                            : getValidDomains().length === 0
+                              ? 'Add domain URLs above to start.'
+                              : 'Complete previous stages first.'}
+                        </p>
+                      </div>
+                    )}
                 </div>
               )}
             </div>
@@ -962,3 +940,4 @@ export default function Ver2Tab() {
     </div>
   );
 }
+
