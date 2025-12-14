@@ -113,7 +113,7 @@ Each description must follow all rules below:
 - A description should not exceed 6 words - start with the "scope" and add some keywords that are relevant to the company.
 - Each description should be different and reflect the specific industry, platform, or problem area.
 - The descriptions must contain the scope term itself, not the word "scope."
-- The scope in each description must mirror the terminology the website uses for its main offering.
+- The scope in each description must mirror the terminology the website uses for its main offering. If the site refers to its main offering using labels such as "software", "platform", "tool", "service", "solution", "suite", etc., then that exact term must appear in the scope for each description. The goal is to include the "scope" of the website and additional keywords that are related to the company.
 
 Format your response as JSON with this exact structure:
 {
@@ -130,26 +130,58 @@ Output ONLY valid JSON, no other text.`;
 
 const defaultStage4Prompt = `You are analyzing a website and need to select the most relevant user questions (prompts) that ChatGPT users would ask about this website. Your job is to go through the list of prompts and select the top 50 that would naturally lead users to the company's homepage.
 
-Website Analysis:
-{website_analysis}
+        Website Analysis:
+        {website_analysis}
 
-Your task:
-Select the TOP 50 most relevant prompts from the list below. The selections should:
-- Prompts that represent user questions that would naturally lead to the company's homepage in the GPT response
-- IMPORTANT: Be relevant to the specific offering of the website. General prompts are not good
-- Represent contemporary questions that ChatGPT users would ask when searching for information about the company
-- Be relevant to the company's main offering, industry, and target customers
-- We need only high quality prompts that have a transactional intent that directly relate to the offering
+        Your task:
+        Select the TOP 50 most relevant prompts from the list below. The selections should:
+        - Prompts that represent user questions that would naturally lead to the company's homepage in the GPT response
+        - IMPORTANT: Be relevant to the specific offering of the website. General prompts are not good
+        - Represent contemporary questions that ChatGPT users would ask when searching for information about the company
+        - Be relevant to the company's main offering, industry, and target customers
+        - We need only high quality prompts that have a transactional intent that directly relate to the offering. Prompts that don't directly relate to the offering and are too general are not good
+        - If there are less than 50 good prompts, return fewer (but at least try to find 50)
 
-Format your response as JSON with this exact structure:
-{
-  "selected_prompt_indices": [60, 7, 110, 25, 90, ...]
-}
+        How to Perform the Task:
 
-Output ONLY valid JSON, no other text.
+        Before selecting any prompt, follow this reasoning process:
 
-All available prompts:
-{prompts_list}`;
+        1. Identify the Company Attributes
+        - Brand name
+        - Main offering (what the company actually provides)
+        - Ideal Customer Profile (who would realistically use and pay for this)
+        - Industry the company operates in
+        - Country or geographic market (if relevant)
+
+        2. Evaluate Each Prompt
+        For each prompt in the list, answer the following internally:
+
+        ❗ Is the prompt directly related to the specific offering of the company?
+
+        ❗ Does the prompt reflect the perspective of the ideal customer (e.g., potential buyer, partner, adopter)?
+
+        ❗ Is the prompt clearly aligned with the company's industry?
+
+        ❗ Is the prompt specific enough to realistically lead to the company's homepage in a GPT answer?
+
+        If the answer to all of these questions is YES → it is relevant.
+        If ANY answer is NO → it must be excluded.
+
+        3. Select Top 50
+        - Prioritize prompts with high relevance
+        - Arrange the prompts according to relevancy, most relevant at the top of the list
+        - Ensure diversity in the selected prompts (different aspects of the business)
+        - Return exactly 50 prompts if possible, fewer if not enough good ones exist
+
+        Format your response as JSON with this exact structure, the length of selected_prompt_indices should be 50:
+        {
+          "selected_prompt_indices": [60, 7, 110, 25, 90, 15, 80, 105, 3, 18, 65, 115, 70, 22, 12, 50, 85, 100, 30, 45, 40, 95, 35, 75, 55]
+        }
+
+        Output ONLY valid JSON, no other text. The prompt_indices should be the numbers from the list below (1-based indexing).
+
+        All available prompts (user questions):
+        {prompts_list}`;
 
 const defaultStage5Prompt = `I'm doing SEO for my website and I want to study the prompts that are directly related to my offering.
 
@@ -174,34 +206,63 @@ Prompts to review:
 
 const defaultStage6Prompt = `You are an expert at categorizing user questions and prompts. Your task is to analyze a list of prompts and group them into meaningful categories that are relevant to the website.
 
-Website Analysis:
-{website_analysis}
+        Website Analysis:
+        {website_analysis}
 
-Your task:
-1. Analyze all the prompts in the context of the website analysis above
-2. Group them into meaningful categories that are relevant to this website's brand, offering, ICP, industry, and target audience
-3. Create 3-7 distinct groups based on similar themes, intents, or topics that make sense for this specific website
-4. Examine each prompt - If it has a transactional intent and the website's owner might find it useful for SEO purposes then assign the prompt to one of the groups. If it is not transactional and not useful for SEO purposes, do not assign it to any group.
-5. Name each group with a clear, descriptive title (2-5 words) that reflects the website's context
+        IMPORTANT: The groups you create should be relevant to this specific website. Consider the website's brand, main offering, ideal customer profile (ICP), industry, and country when creating categories. The topics and themes should align with what this website offers and who it serves.
 
-Format your response as a valid JSON with the following structure:
-{
-    "groups": [
+        Your task:
+        1. Analyze all the prompts in the context of the website analysis above
+        2. Group them into meaningful categories that are relevant to this website's brand, offering, ICP, industry, and target audience
+        3. Create 3-7 distinct groups based on similar themes, intents, or topics that make sense for this specific website
+        4. Examine each prompt - If it has a transactional intent and the website's owner might find it useful for SEO purposes then assign the prompt to one of the groups. If it is not transactional and not useful for SEO purposes, do not assign it to any group. 
+        5. Name each group with a clear, descriptive title (2-5 words) that reflects the website's context
+        6. Provide a brief explanation for each group that shows how it relates to the website
+
+        When creating groups, consider:
+        - Similar topics or themes that are relevant to this website's offerings
+        - Similar user intents (commercial, informational, etc.) in the context of this website
+        - Similar product/service categories that align with the website's main offering
+        - Similar user needs or problems being solved that relate to this website's target audience
+        - The website's industry, ICP (B2B/B2C), and geographic focus
+
+        Guidelines for grouping:
+        - Create 3-7 distinct groups (not too many, not too few) that are relevant to this website
+        - Each group should have at least 2 prompts unless there's a clearly unique outlier
+        - Group names should be descriptive, professional, and relevant to the website's context
+        - A prompt can be assigned to only one group. 
+        - If the prompt is not relevant to potential customer intent, do not assign it to any group.
+        - IMPORTANT: In addition to filtering based on relevance, check for duplicate or similar prompts — including differences in capitalization, spacing, punctuation, or slightly varied wording that expresses the same meaning. If such duplicates exist, keep only one instance — but only if it is relevant.
+        - Focus on the core intent or theme that relates to the website, not minor details
+        - Ensure all groups make sense in the context of the website analysis provided above
+
+        Format your response as a valid JSON with the following structure:
         {
-            "group_name": "Group Name",
-            "description": "Brief description of what this group represents",
-            "prompt_indices": [1, 3, 5, ...],
-            "prompt_count": X
-        },
-        ...
-    ],
-    "total_groups": X
-}
+            "groups": [
+                {
+                    "group_name": "Group Name",
+                    "description": "Brief description of what this group represents",
+                    "prompt_indices": [1, 3, 5, ...],
+                    "prompt_count": X
+                },
+                ...
+            ],
+            "total_groups": X
+        }
 
-Output ONLY valid JSON, no other text.
+        Where:
+        - group_name: A clear, descriptive name for the group (2-5 words)
+        - description: One sentence explaining what prompts in this group have in common
+        - prompt_indices: Array of prompt numbers (1-based) that belong to this group
+        - prompt_count: Number of prompts in this group
+        - total_groups: Total number of groups created
 
-Here are the prompts:
-{prompts_list}`;
+        Make sure prompts are not assigned to more than one group.
+
+        Output ONLY valid JSON, no other text.
+
+        Here are the prompts:
+        {prompts_list}`;
 
 const createEmptyResults = (): Ver2Results => ({
   stage1_website_analysis: null,
