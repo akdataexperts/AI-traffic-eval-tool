@@ -19,6 +19,8 @@ export interface WebsiteAnalysis {
   model?: string;
 }
 
+
+
 export interface PromptResult {
   first_prompt: string;
   similarityScore: number;
@@ -65,9 +67,9 @@ export async function analyzeWebsiteWithGpt4o(
 ): Promise<WebsiteAnalysis> {
   try {
     log(`Analyzing website: ${websiteUrl}`);
-    
+
     const openai = getOpenAIClient();
-    
+
     // Extract domain name from URL
     let normalizedUrl = websiteUrl;
     if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
@@ -75,7 +77,7 @@ export async function analyzeWebsiteWithGpt4o(
     }
     const url = new URL(normalizedUrl);
     const domainName = url.host.replace('www.', '');
-    
+
     const defaultPrompt = `Go online to ${domainName} and analyze the website to provide the following information:
 
 1. Brand name: What is the brand of the website?
@@ -90,10 +92,10 @@ export async function analyzeWebsiteWithGpt4o(
 
 Provide your analysis in a clear, structured format.`;
 
-    const prompt = customPrompt 
+    const prompt = customPrompt
       ? customPrompt.replace(/\{domain_name\}/g, domainName)
       : defaultPrompt;
-    
+
     try {
       // Try using responses API with web search
       const response = await openai.responses.create({
@@ -101,33 +103,33 @@ Provide your analysis in a clear, structured format.`;
         tools: [{ type: 'web_search_preview' as any }],
         input: prompt,
       } as any);
-      
+
       const content = (response as any).output_text?.trim();
-      
+
       if (!content) {
         throw new Error('GPT-4o returned empty response');
       }
-      
+
       log(`Website analysis completed for ${domainName}`);
       return { analysis: content, model: 'gpt-4o (web_search_preview)' };
-      
+
     } catch (e: any) {
       // Fallback to regular chat completions
       log(`Responses API failed, trying regular chat completions: ${e.message}`);
-      
+
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         max_tokens: 500,
       });
-      
+
       const content = response.choices[0]?.message?.content?.trim();
-      
+
       if (!content) {
         throw new Error('GPT-4o returned empty response');
       }
-      
+
       log(`Website analysis completed for ${domainName} (fallback)`);
       return { analysis: content, model: 'gpt-4o (chat)' };
     }
@@ -136,6 +138,8 @@ Provide your analysis in a clear, structured format.`;
     throw error;
   }
 }
+
+
 
 // =============================================================================
 // STAGE 2: Generate Descriptions from Website Analysis
@@ -147,14 +151,14 @@ export async function getDescriptionsFromAnalysis(
 ): Promise<{ descriptions: string[]; model: string; prompt: string }> {
   try {
     log('Generating descriptions from website analysis');
-    
+
     const openai = getOpenAIClient();
     const websiteAnalysisText = websiteAnalysis.analysis;
-    
+
     if (!websiteAnalysisText) {
       throw new Error('No website analysis provided');
     }
-    
+
     const defaultPrompt = `You are a marketing expert that identifies exactly what the company offers.
 
 Here is an expert's analysis of the website:
@@ -189,10 +193,10 @@ Output ONLY valid JSON, no other text.`;
 
     const prompt = (customPrompt || defaultPrompt)
       .replace(/\{website_analysis\}/g, websiteAnalysisText);
-    
+
     let content: string;
     let model = 'gpt-5.1';
-    
+
     try {
       // Try gpt-5.1 with JSON response format (matching Python)
       const response = await openai.chat.completions.create({
@@ -200,39 +204,39 @@ Output ONLY valid JSON, no other text.`;
         messages: [{ role: 'user', content: prompt }],
         response_format: { type: 'json_object' },
       });
-      
+
       content = response.choices[0]?.message?.content?.trim() || '';
     } catch (e: any) {
       log(`Error with gpt-5.1, trying gpt-4o fallback: ${e.message}`);
       model = 'gpt-4o';
-      
+
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         max_tokens: 200,
       });
-      
+
       content = response.choices[0]?.message?.content?.trim() || '';
     }
-    
+
     // Parse JSON response
     const jsonContent = extractJsonFromResponse(content);
     const resultData = JSON.parse(jsonContent);
     let descriptions: string[] = resultData.descriptions || [];
-    
+
     // Ensure we have exactly 5 descriptions
     while (descriptions.length < 5) {
       descriptions.push('Company information and services');
     }
-    
+
     log(`Generated ${descriptions.length} descriptions`);
-    return { 
-      descriptions: descriptions.slice(0, 5), 
+    return {
+      descriptions: descriptions.slice(0, 5),
       model,
-      prompt 
+      prompt
     };
-    
+
   } catch (error: any) {
     log(`Error generating descriptions: ${error.message}`);
     throw error;
@@ -251,9 +255,9 @@ export async function selectTopPromptsWithGpt(
 ): Promise<{ prompts: string[]; model: string; prompt: string }> {
   try {
     log(`Selecting top ${limit} prompts from ${allResults.length} candidates`);
-    
+
     const openai = getOpenAIClient();
-    
+
     // Deduplicate by first_prompt
     const uniqueResults: PromptResult[] = [];
     const seen = new Set<string>();
@@ -264,13 +268,13 @@ export async function selectTopPromptsWithGpt(
         uniqueResults.push(r);
       }
     }
-    
+
     const promptsList = uniqueResults
       .map((r, i) => `${i + 1}. ${r.first_prompt}`)
       .join('\n');
-    
+
     const websiteAnalysisText = websiteAnalysis.analysis;
-    
+
     const defaultPrompt = `You are analyzing a website and need to select the most relevant user questions (prompts) that ChatGPT users would ask about this website. Your job is to go through the list of prompts and select the top ${limit} that would naturally lead users to the company's homepage.
 
 Website Analysis:
@@ -297,18 +301,18 @@ All available prompts:
     const prompt = (customPrompt || defaultPrompt)
       .replace(/\{website_analysis\}/g, websiteAnalysisText)
       .replace(/\{prompts_list\}/g, promptsList);
-    
+
     const response = await openai.chat.completions.create({
       model: 'gpt-5.1',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
     });
-    
+
     const content = response.choices[0]?.message?.content?.trim() || '';
     const jsonContent = extractJsonFromResponse(content);
     const resultData = JSON.parse(jsonContent);
     const indices: number[] = resultData.selected_prompt_indices || [];
-    
+
     // Map indices (1-based) to actual prompts
     const selected: string[] = [];
     for (const idx of indices.slice(0, limit)) {
@@ -317,29 +321,29 @@ All available prompts:
         selected.push(uniqueResults[listIndex].first_prompt);
       }
     }
-    
+
     // Fill if needed
     for (const r of uniqueResults) {
       if (!selected.includes(r.first_prompt) && selected.length < limit) {
         selected.push(r.first_prompt);
       }
     }
-    
+
     log(`Selected ${selected.length} prompts`);
-    return { 
-      prompts: selected.slice(0, limit), 
+    return {
+      prompts: selected.slice(0, limit),
       model: 'gpt-5.1',
-      prompt 
+      prompt
     };
-    
+
   } catch (error: any) {
     log(`Error selecting prompts: ${error.message}`);
     // Fallback: return first N prompts
     const uniquePrompts = [...new Set(allResults.map(r => r.first_prompt))];
-    return { 
-      prompts: uniquePrompts.slice(0, limit), 
+    return {
+      prompts: uniquePrompts.slice(0, limit),
       model: 'fallback',
-      prompt: '' 
+      prompt: ''
     };
   }
 }
@@ -351,27 +355,28 @@ All available prompts:
 export async function filterPromptsWithGpt(
   prompts: string[],
   websiteAnalysis: WebsiteAnalysis,
-  customPrompt?: string
+  customPrompt?: string,
+  model: string = 'gpt-5.1'
 ): Promise<{ prompts: string[]; model: string; prompt: string }> {
   try {
     if (!ENABLE_PROMPT_FILTERING) {
       log('Prompt filtering is disabled, keeping all prompts');
       return { prompts, model: 'disabled', prompt: '' };
     }
-    
+
     if (!prompts.length) {
       return { prompts: [], model: 'empty', prompt: '' };
     }
-    
-    log(`Filtering ${prompts.length} prompts`);
-    
+
+    log(`Filtering ${prompts.length} prompts using ${model}`);
+
     const openai = getOpenAIClient();
     const websiteAnalysisText = websiteAnalysis.analysis;
-    
+
     const promptsList = prompts
       .map((p, i) => `${i + 1}. ${p}`)
       .join('\n');
-    
+
     const defaultPrompt = `I'm doing SEO for my website and I want to study the prompts that are directly related to my offering.
 
 Website Analysis:
@@ -396,20 +401,20 @@ Prompts to review:
     const prompt = (customPrompt || defaultPrompt)
       .replace(/\{website_analysis\}/g, websiteAnalysisText)
       .replace(/\{prompts_list\}/g, promptsList);
-    
+
     const response = await openai.chat.completions.create({
-      model: 'gpt-5.1',
+      model: model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0,
       top_p: 1,
       response_format: { type: 'json_object' },
     });
-    
+
     const content = response.choices[0]?.message?.content?.trim() || '';
     const jsonContent = extractJsonFromResponse(content);
     const resultData = JSON.parse(jsonContent);
     const keepNumbers: number[] = resultData.keep_prompt_numbers || [];
-    
+
     // Convert 1-based numbers to filtered prompts
     const filteredPrompts: string[] = [];
     for (const num of keepNumbers) {
@@ -418,14 +423,14 @@ Prompts to review:
         filteredPrompts.push(prompts[idx]);
       }
     }
-    
+
     log(`Filtered to ${filteredPrompts.length} prompts (from ${prompts.length})`);
-    return { 
-      prompts: filteredPrompts, 
-      model: 'gpt-5.1',
-      prompt 
+    return {
+      prompts: filteredPrompts,
+      model: model,
+      prompt
     };
-    
+
   } catch (error: any) {
     log(`Error filtering prompts: ${error.message}`);
     // Fallback: return all prompts
@@ -446,16 +451,16 @@ export async function groupPromptsWithGpt(
     if (!prompts.length) {
       return { groups: [], model: 'empty', prompt: '' };
     }
-    
+
     log(`Grouping ${prompts.length} prompts`);
-    
+
     const openai = getOpenAIClient();
     const websiteAnalysisText = websiteAnalysis.analysis;
-    
+
     const promptsList = prompts
       .map((p, i) => `${i + 1}. ${p}`)
       .join('\n');
-    
+
     const defaultPrompt = `You are an expert at categorizing user questions and prompts. Your task is to analyze a list of prompts and group them into meaningful categories that are relevant to the website.
 
 Website Analysis:
@@ -490,19 +495,19 @@ Here are the prompts:
     const prompt = (customPrompt || defaultPrompt)
       .replace(/\{website_analysis\}/g, websiteAnalysisText)
       .replace(/\{prompts_list\}/g, promptsList);
-    
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
     });
-    
+
     const content = response.choices[0]?.message?.content?.trim() || '';
     const jsonContent = extractJsonFromResponse(content);
     const resultData: GroupingResult = JSON.parse(jsonContent);
-    
+
     // Map indices to actual prompts
     const groups: Array<{ group_name: string; description: string; prompts: string[] }> = [];
-    
+
     if (resultData.groups && Array.isArray(resultData.groups)) {
       for (const group of resultData.groups) {
         const groupPrompts: string[] = [];
@@ -512,7 +517,7 @@ Here are the prompts:
             groupPrompts.push(prompts[listIndex]);
           }
         }
-        
+
         if (groupPrompts.length > 0) {
           groups.push({
             group_name: group.group_name || 'Unnamed Group',
@@ -522,7 +527,7 @@ Here are the prompts:
         }
       }
     }
-    
+
     // Fallback if grouping failed
     if (groups.length === 0) {
       log('Grouping failed, creating single group with all prompts');
@@ -532,25 +537,25 @@ Here are the prompts:
         prompts: prompts.slice(0, 25),
       });
     }
-    
+
     log(`Grouped prompts into ${groups.length} groups`);
-    return { 
-      groups, 
+    return {
+      groups,
       model: 'gpt-4o',
-      prompt 
+      prompt
     };
-    
+
   } catch (error: any) {
     log(`Error grouping prompts: ${error.message}`);
     // Fallback: single group
-    return { 
+    return {
       groups: [{
         group_name: 'All Prompts',
         description: 'User questions about the website',
         prompts: prompts.slice(0, 25),
-      }], 
+      }],
       model: 'fallback',
-      prompt: '' 
+      prompt: ''
     };
   }
 }

@@ -5,6 +5,7 @@ import { useState } from 'react';
 // Types for Ver2 results
 interface Ver2Results {
   stage1_website_analysis: { analysis: string; model: string; prompt: string } | null;
+
   stage2_descriptions: { descriptions: string[]; model: string; prompt: string } | null;
   stage3_similar_prompts: { prompts: Array<{ prompt: string; similarity: number; collection: string }>; total: number } | null;
   stage4_selected_prompts: { prompts: string[]; model: string; prompt: string } | null;
@@ -26,7 +27,7 @@ interface WorkflowStage {
   description: string;
   model: string;
   hasLLM: boolean;
-  promptKey: 'stage1' | 'stage2' | 'stage4' | 'stage5' | 'stage6' | null;
+  promptKey: 'stage1' | 'stage1Info' | 'stage2' | 'stage4' | 'stage5' | 'stage6' | null;
 }
 
 // Workflow stages definition
@@ -34,7 +35,7 @@ const workflowStages: WorkflowStage[] = [
   {
     id: 1,
     name: 'Analyze Website',
-    description: 'Use GPT-4o with web search to analyze the website and extract brand info, offerings, ICP, industry, and country',
+    description: 'Provide formatted website analysis for brand, ICP, industry, country',
     model: 'gpt-4o (web search)',
     hasLLM: true,
     promptKey: 'stage1',
@@ -67,7 +68,7 @@ const workflowStages: WorkflowStage[] = [
     id: 5,
     name: 'Filter Prompts',
     description: 'Filter out non-relevant prompts and remove duplicates',
-    model: 'gpt-5.1',
+    model: 'gpt-4o',
     hasLLM: true,
     promptKey: 'stage5',
   },
@@ -95,6 +96,8 @@ const defaultStage1Prompt = `Go online to {domain_name} and analyze the website 
 5. Country: What is the primary country or countries where this company operates or serves customers?
 
 Provide your analysis in a clear, structured format.`;
+
+
 
 const defaultStage2Prompt = `You are a marketing expert that identifies exactly what the company offers.
 
@@ -183,23 +186,51 @@ const defaultStage4Prompt = `You are analyzing a website and need to select the 
         All available prompts (user questions):
         {prompts_list}`;
 
-const defaultStage5Prompt = `I'm doing SEO for my website and I want to study the prompts that are directly related to my offering.
+const defaultStage5Prompt = `I'm doing SEO for my website and I want to study only the prompts that are directly related to my offering.
 
 Website Analysis:
 {website_analysis}
 
-INSTRUCTIONS:
-Review the prompts below and remove any that are not relevant to my offering. I am only interested in prompts that are directly connected to my products and services and represent questions a potential customer would ask.
+TASK:
+Review the numbered list of prompts below and decide which ones should be KEPT.
 
-IMPORTANT: In addition to filtering based on relevance, check for duplicate or similar prompts — including differences in capitalization, spacing, punctuation, or slightly varied wording that expresses the same meaning. If such duplicates exist, keep only one instance — but only if it is relevant.
-Return ONLY the numbers of prompts that should be KEPT (the good ones).
+You must evaluate EACH prompt by answering the following YES/NO question:
 
-Format your response as JSON:
+Is the user describing a need, use case, or problem that a company offering products or services like mine is designed to solve (even if the company or brand is not explicitly mentioned)?
+
+IMPORTANT INTERPRETATION GUIDELINES:
+- Treat buyer exploration, comparison, selection, performance, suitability, and recommendation questions as TRANSACTIONAL intent.
+- A prompt should be kept ONLY if it explicitly mentions, or clearly implies, the specific product or service category described in the Website Analysis.
+- Prompts expressing interest in choosing, evaluating, comparing, buying, gifting, or using products/services in my category should be considered YES, even if phrased broadly (e.g., “best”, “top”, “most”, “recommended”).
+- Do NOT require explicit brand names, prices, or purchase language for a prompt to qualify.
+- When a prompt could reasonably come from a potential buyer, prefer KEEP over DISCARD.
+- The prompt must explicitly involve the type of product or service described in the website analysis, otherwise DISCARD it.
+
+FILTERING RULES:
+- Keep a prompt ONLY IF the answer to the YES/NO question above is YES.
+- Discard the prompt if the answer is NO.
+- Discard prompts that are generic and could apply to many unrelated industries or services unless they clearly reference the offering category.
+- Discard prompts that are clearly:
+  - About writing or generating content
+  - About marketing, SEO, sales, or business strategy
+  - About opening, promoting, or running a business
+  - About employment, hiring, or careers
+  - Purely informational, academic, or market research with no buyer intent
+- In addition to relevance filtering, identify duplicate or near-duplicate prompts (including differences in capitalization, wording, or punctuation).
+  If duplicates exist, keep only ONE — and only if it passes the relevance rules above.
+- If ALL prompts are discarded, return an empty list.
+
+OUTPUT REQUIREMENTS:
+- Return ONLY the numbers of the prompts that should be KEPT.
+- Do NOT include explanations, text, or commentary.
+- If no prompts qualify, return:
+  { "keep_prompt_numbers": [] }
+
+Format the response strictly as valid JSON:
+
 {
-  "keep_prompt_numbers": [1, 3, 5, 7, ...]
+  "keep_prompt_numbers": [1, 3, 5, 17]
 }
-
-Output ONLY valid JSON, no other text.
 
 Prompts to review:
 {prompts_list}`;
@@ -292,7 +323,17 @@ const ResultTextArea = ({ content, label, count }: { content: string; label?: st
 
 export default function Ver2Tab() {
   // Domain URLs (simple list)
-  const [domainUrls, setDomainUrls] = useState<string[]>(['']);
+  const [domainUrls, setDomainUrls] = useState<string[]>([
+    'https://www.odealarose.com',
+    'https://zionhealthshare.org',
+    'promptlayer.com',
+    'sapiens.com',
+    'kaltura.com',
+    'navan.com',
+    'https://www.sophia.org',
+    'dior.com',
+    'particleformen.com'
+  ]);
 
   // Results per domain
   const [domainResults, setDomainResults] = useState<{ [url: string]: DomainResult }>({});
@@ -304,10 +345,14 @@ export default function Ver2Tab() {
 
   // Shared editable prompts
   const [stage1Prompt, setStage1Prompt] = useState(defaultStage1Prompt);
+
   const [stage2Prompt, setStage2Prompt] = useState(defaultStage2Prompt);
   const [stage4Prompt, setStage4Prompt] = useState(defaultStage4Prompt);
   const [stage5Prompt, setStage5Prompt] = useState(defaultStage5Prompt);
   const [stage6Prompt, setStage6Prompt] = useState(defaultStage6Prompt);
+
+  // Model selection state
+  const [stage5Model, setStage5Model] = useState<string>('gpt-4o');
 
   // UI state
   const [expandedStages, setExpandedStages] = useState<{ [key: number]: boolean }>({});
@@ -402,6 +447,9 @@ export default function Ver2Tab() {
             stage4: stage4Prompt,
             stage5: stage5Prompt,
             stage6: stage6Prompt,
+          },
+          models: {
+            stage5: stage5Model,
           },
           previousResults: startStage > 1 ? previousResults : undefined,
         }),
@@ -500,7 +548,7 @@ export default function Ver2Tab() {
 
       const prevStageCompleted = (() => {
         switch (stageId) {
-          case 2: return !!result.results.stage1_website_analysis;
+          case 2: return !!(result.results.stage1_website_analysis);
           case 3: return !!result.results.stage2_descriptions;
           case 4: return !!result.results.stage3_similar_prompts;
           case 5: return !!result.results.stage4_selected_prompts;
@@ -533,7 +581,7 @@ export default function Ver2Tab() {
 
       const stageCompleted = (() => {
         switch (stageId) {
-          case 1: return !!result.results.stage1_website_analysis;
+          case 1: return !!(result.results.stage1_website_analysis);
           case 2: return !!result.results.stage2_descriptions;
           case 3: return !!result.results.stage3_similar_prompts;
           case 4: return !!result.results.stage4_selected_prompts;
@@ -792,9 +840,53 @@ export default function Ver2Tab() {
               {/* Stage Content */}
               {expandedStages[stage.id] && (
                 <div className="p-4 border-t border-gray-200">
-                  {/* Prompt Editor for LLM stages */}
-                  {stage.hasLLM && stage.promptKey && (
+                  {/* Stage 1 - Two parallel prompts */}
+                  {stage.id === 1 && (
                     <div className="mb-4">
+                      <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <h5 className="font-semibold text-blue-800 text-sm mb-2">🔍 Website Analysis</h5>
+                        <textarea
+                          value={stage1Prompt}
+                          onChange={(e) => setStage1Prompt(e.target.value)}
+                          rows={8}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-xs text-gray-900"
+                          disabled={isProcessing}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Placeholder: <code className="bg-gray-100 px-1 rounded ml-1">{"{domain_name}"}</code>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {/* Prompt Editor for other LLM stages */}
+                  {stage.hasLLM && stage.promptKey && stage.id !== 1 && (
+                    <div className="mb-4">
+                      {stage.id === 5 && (
+                        <div className="mb-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                          <label className="block text-sm font-semibold text-purple-900 mb-2">
+                            Select AI Model
+                          </label>
+                          <div className="flex gap-4">
+                            {['gpt-4o', 'gpt-5.1', 'gpt-5.2'].map((model) => (
+                              <label key={model} className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="stage5Model"
+                                  value={model}
+                                  checked={stage5Model === model}
+                                  onChange={(e) => setStage5Model(e.target.value)}
+                                  className="text-purple-600 focus:ring-purple-500"
+                                  disabled={isProcessing}
+                                />
+                                <span className={`text-sm ${stage5Model === model ? 'font-medium text-purple-900' : 'text-gray-600'}`}>
+                                  {model}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Prompt Template (Shared across all domains)
                       </label>
@@ -807,9 +899,14 @@ export default function Ver2Tab() {
                       />
                       <p className="text-xs text-gray-500 mt-1">
                         Placeholders:
-                        {stage.promptKey === 'stage1' && <code className="bg-gray-100 px-1 rounded ml-1">{"{domain_name}"}</code>}
                         {stage.promptKey === 'stage2' && <code className="bg-gray-100 px-1 rounded ml-1">{"{website_analysis}"}</code>}
-                        {(stage.promptKey === 'stage4' || stage.promptKey === 'stage5' || stage.promptKey === 'stage6') && (
+                        {(stage.promptKey === 'stage4' || stage.promptKey === 'stage6') && (
+                          <>
+                            <code className="bg-gray-100 px-1 rounded ml-1">{"{website_analysis}"}</code>
+                            <code className="bg-gray-100 px-1 rounded ml-1">{"{prompts_list}"}</code>
+                          </>
+                        )}
+                        {stage.promptKey === 'stage5' && (
                           <>
                             <code className="bg-gray-100 px-1 rounded ml-1">{"{website_analysis}"}</code>
                             <code className="bg-gray-100 px-1 rounded ml-1">{"{prompts_list}"}</code>
@@ -866,7 +963,7 @@ export default function Ver2Tab() {
                       {stageResults.map(({ url, result }) => {
                         const hasResult = (() => {
                           switch (stage.id) {
-                            case 1: return !!result.results.stage1_website_analysis;
+                            case 1: return !!(result.results.stage1_website_analysis);
                             case 2: return !!result.results.stage2_descriptions;
                             case 3: return !!result.results.stage3_similar_prompts;
                             case 4: return !!result.results.stage4_selected_prompts;
@@ -889,11 +986,18 @@ export default function Ver2Tab() {
                               {result.error && <span className="text-xs text-red-600">Error: {result.error}</span>}
                             </div>
 
-                            {/* Stage 1 Result */}
+                            {/* Stage 1 Results */}
                             {stage.id === 1 && result.results.stage1_website_analysis && (
-                              <ResultTextArea
-                                content={result.results.stage1_website_analysis.analysis}
-                              />
+                              <div className="space-y-3">
+                                {result.results.stage1_website_analysis && (
+                                  <div className="p-2 bg-blue-50 rounded-lg border border-blue-200">
+                                    <h6 className="text-xs font-semibold text-blue-800 mb-1">🔍 Website Analysis</h6>
+                                    <ResultTextArea
+                                      content={result.results.stage1_website_analysis.analysis}
+                                    />
+                                  </div>
+                                )}
+                              </div>
                             )}
 
                             {/* Stage 2 Result */}
@@ -922,10 +1026,27 @@ export default function Ver2Tab() {
 
                             {/* Stage 5 Result */}
                             {stage.id === 5 && result.results.stage5_filtered_prompts && (
-                              <ResultTextArea
-                                label={`Filtered to ${result.results.stage5_filtered_prompts.prompts.length} prompts`}
-                                content={result.results.stage5_filtered_prompts.prompts.map((prompt, idx) => `${idx + 1}. ${prompt}`).join('\n')}
-                              />
+                              <div className="space-y-3">
+                                <ResultTextArea
+                                  label={`Filtered to ${result.results.stage5_filtered_prompts.prompts.length} prompts (using ${result.results.stage5_filtered_prompts.model})`}
+                                  content={result.results.stage5_filtered_prompts.prompts.map((prompt, idx) => `${idx + 1}. ${prompt}`).join('\n')}
+                                />
+                                {result.results.stage5_filtered_prompts.prompt && result.results.stage5_filtered_prompts.prompt !== 'default' && (
+                                  <details className="mt-2">
+                                    <summary className="cursor-pointer text-xs text-purple-600 hover:text-purple-800 font-medium">
+                                      📝 View Actual Prompt Sent
+                                    </summary>
+                                    <div className="mt-2 p-2 bg-purple-50 rounded-lg border border-purple-200">
+                                      <textarea
+                                        readOnly
+                                        value={result.results.stage5_filtered_prompts.prompt}
+                                        rows={12}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white font-mono text-xs text-gray-900 resize-y"
+                                      />
+                                    </div>
+                                  </details>
+                                )}
+                              </div>
                             )}
 
                             {/* Stage 6 Result */}
@@ -948,7 +1069,7 @@ export default function Ver2Tab() {
                   {stageResults.every(({ result }) => {
                     const hasResult = (() => {
                       switch (stage.id) {
-                        case 1: return !!result.results.stage1_website_analysis;
+                        case 1: return !!(result.results.stage1_website_analysis);
                         case 2: return !!result.results.stage2_descriptions;
                         case 3: return !!result.results.stage3_similar_prompts;
                         case 4: return !!result.results.stage4_selected_prompts;
@@ -971,6 +1092,7 @@ export default function Ver2Tab() {
                     )}
                 </div>
               )}
+
             </div>
           );
         })}
@@ -998,7 +1120,7 @@ export default function Ver2Tab() {
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

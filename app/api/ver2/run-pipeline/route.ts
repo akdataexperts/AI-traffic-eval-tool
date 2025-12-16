@@ -3,11 +3,13 @@ import { generateEmbedding } from '@/lib/embeddings';
 import { findSimilarPromptsWithDetails, PromptWithDetails } from '@/lib/mongodb';
 import {
   analyzeWebsiteWithGpt4o,
+
   getDescriptionsFromAnalysis,
   selectTopPromptsWithGpt,
   filterPromptsWithGpt,
   groupPromptsWithGpt,
   WebsiteAnalysis,
+
   TOTAL_RESULTS_LIMIT,
 } from '@/lib/domain-analysis';
 
@@ -21,10 +23,14 @@ interface PipelineRequest {
   endStage?: number;   // 1-6, defaults to 6
   prompts?: {
     stage1?: string;
+
     stage2?: string;
     stage4?: string;
     stage5?: string;
     stage6?: string;
+  };
+  models?: {
+    stage5?: string;
   };
   // Previous results needed when starting from a stage > 1
   previousResults?: {
@@ -33,6 +39,7 @@ interface PipelineRequest {
       model: string;
       prompt: string;
     };
+
     stage2_descriptions?: {
       descriptions: string[];
       model: string;
@@ -61,6 +68,7 @@ interface PipelineResponse {
     model: string;
     prompt: string;
   } | null;
+
   stage2_descriptions: {
     descriptions: string[];
     model: string;
@@ -104,7 +112,7 @@ function log(message: string) {
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
-  
+
   try {
     const body: PipelineRequest = await request.json();
     const { websiteUrl, prompts, previousResults } = body;
@@ -130,6 +138,7 @@ export async function POST(request: NextRequest) {
 
     const response: PipelineResponse = {
       stage1_website_analysis: previousResults?.stage1_website_analysis || null,
+
       stage2_descriptions: previousResults?.stage2_descriptions || null,
       stage3_similar_prompts: previousResults?.stage3_similar_prompts || null,
       stage4_selected_prompts: previousResults?.stage4_selected_prompts || null,
@@ -139,9 +148,10 @@ export async function POST(request: NextRequest) {
     };
 
     // Variables to track data flow between stages
-    let websiteAnalysis: WebsiteAnalysis | null = previousResults?.stage1_website_analysis 
+    let websiteAnalysis: WebsiteAnalysis | null = previousResults?.stage1_website_analysis
       ? { analysis: previousResults.stage1_website_analysis.analysis, model: previousResults.stage1_website_analysis.model }
       : null;
+
     let descriptions: string[] = previousResults?.stage2_descriptions?.descriptions || [];
     let allPromptResults: PromptWithDetails[] = previousResults?.stage3_similar_prompts?.prompts.map(p => ({
       first_prompt: p.prompt,
@@ -157,14 +167,18 @@ export async function POST(request: NextRequest) {
     if (startStage <= 1 && endStage >= 1) {
       log('Stage 1: Analyzing website...');
       const stage1Start = Date.now();
-      
+
       try {
-        websiteAnalysis = await analyzeWebsiteWithGpt4o(websiteUrl, prompts?.stage1);
+        const analysisResult = await analyzeWebsiteWithGpt4o(websiteUrl, prompts?.stage1);
+
+        // Store website analysis result
+        websiteAnalysis = analysisResult;
         response.stage1_website_analysis = {
           analysis: websiteAnalysis.analysis,
           model: websiteAnalysis.model || 'gpt-4o',
           prompt: prompts?.stage1 || 'default',
         };
+
         response.executedStages?.push(1);
         log(`Stage 1 completed in ${Date.now() - stage1Start}ms`);
       } catch (error: any) {
@@ -193,7 +207,7 @@ export async function POST(request: NextRequest) {
     if (startStage <= 2 && endStage >= 2) {
       log('Stage 2: Generating descriptions...');
       const stage2Start = Date.now();
-      
+
       try {
         const stage2Result = await getDescriptionsFromAnalysis(websiteAnalysis!, prompts?.stage2);
         descriptions = stage2Result.descriptions;
@@ -230,7 +244,7 @@ export async function POST(request: NextRequest) {
     if (startStage <= 3 && endStage >= 3) {
       log('Stage 3: Finding similar prompts via vector search...');
       const stage3Start = Date.now();
-      
+
       try {
         // Process all descriptions in parallel
         const searchPromises = descriptions.map(async (desc) => {
@@ -244,7 +258,7 @@ export async function POST(request: NextRequest) {
         });
 
         const results = await Promise.all(searchPromises);
-        
+
         // Combine all results
         allPromptResults = [];
         for (const descriptionResults of results) {
@@ -273,7 +287,7 @@ export async function POST(request: NextRequest) {
           total: allPromptResults.length,
         };
         response.executedStages?.push(3);
-        
+
         log(`Stage 3 completed in ${Date.now() - stage3Start}ms - Found ${allPromptResults.length} unique prompts`);
       } catch (error: any) {
         log(`Stage 3 failed: ${error.message}`);
@@ -301,7 +315,7 @@ export async function POST(request: NextRequest) {
     if (startStage <= 4 && endStage >= 4) {
       log('Stage 4: Selecting top prompts with GPT...');
       const stage4Start = Date.now();
-      
+
       try {
         const stage4Result = await selectTopPromptsWithGpt(
           websiteAnalysis!,
@@ -342,12 +356,13 @@ export async function POST(request: NextRequest) {
     if (startStage <= 5 && endStage >= 5) {
       log('Stage 5: Filtering prompts with GPT...');
       const stage5Start = Date.now();
-      
+
       try {
         const stage5Result = await filterPromptsWithGpt(
           selectedPrompts,
           websiteAnalysis!,
-          prompts?.stage5
+          prompts?.stage5,
+          body.models?.stage5
         );
         filteredPrompts = stage5Result.prompts;
         response.stage5_filtered_prompts = {
@@ -367,13 +382,7 @@ export async function POST(request: NextRequest) {
 
       // Handle case where all prompts were filtered out
       if (filteredPrompts.length === 0) {
-        log('All prompts filtered out, using selected prompts as fallback');
-        filteredPrompts = selectedPrompts.slice(0, 25);
-        response.stage5_filtered_prompts = {
-          prompts: filteredPrompts,
-          model: 'fallback',
-          prompt: 'All prompts filtered out, using selected prompts as fallback',
-        };
+        log('All prompts filtered out, returning empty list');
       }
     } else if (startStage > 5 && filteredPrompts.length === 0) {
       return NextResponse.json(
@@ -394,7 +403,7 @@ export async function POST(request: NextRequest) {
     if (startStage <= 6 && endStage >= 6) {
       log('Stage 6: Grouping prompts with GPT...');
       const stage6Start = Date.now();
-      
+
       try {
         const stage6Result = await groupPromptsWithGpt(
           filteredPrompts,
