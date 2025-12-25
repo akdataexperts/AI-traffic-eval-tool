@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import Ver2Tab from './Ver2Tab';
+import BrowserFanoutTab from './BrowserFanoutTab';
 
 interface InvestigationData {
   keywords: Array<{
@@ -127,8 +128,8 @@ interface WebsiteEntry {
 }
 
 export default function Home() {
-  // Tab state for switching between ver1 and ver2
-  const [activeMainTab, setActiveMainTab] = useState<'ver1' | 'ver2'>('ver1');
+  // Tab state for switching between ver1, ver2, and browser-fanout
+  const [activeMainTab, setActiveMainTab] = useState<'ver1' | 'ver2' | 'browser-fanout'>('ver1');
   
   const [websiteEntries, setWebsiteEntries] = useState<WebsiteEntry[]>([
     { id: '1', url: '', excelFiles: [], excelComparisonFiles: [], keywords: [], investigationResults: null, similarityResults: null, isProcessing: false, error: null }
@@ -1178,10 +1179,23 @@ Provide your analysis in a clear, structured format.`;
           >
             Ver2 - GPT Traffic Preview Workflow
           </button>
+          <button
+            onClick={() => setActiveMainTab('browser-fanout')}
+            className={`px-6 py-3 rounded-t-lg font-semibold transition-all ${
+              activeMainTab === 'browser-fanout'
+                ? 'bg-white text-orange-600 border-t-2 border-l-2 border-r-2 border-orange-600'
+                : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            }`}
+          >
+            Browser Fanout
+          </button>
         </div>
 
         {/* Ver2 Content */}
         {activeMainTab === 'ver2' && <Ver2Tab />}
+
+        {/* Browser Fanout Content */}
+        {activeMainTab === 'browser-fanout' && <BrowserFanoutTab />}
 
         {/* Ver1 Content - Original functionality */}
         {activeMainTab === 'ver1' && (
