@@ -199,35 +199,69 @@ export async function POST(request: NextRequest) {
         capturedModel = 'unknown';
         streamingComplete = false;
 
-        // Find Chrome
-        const chromePaths = [
-          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-          process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
-        ];
+        // Determine if we're in a serverless/deployed environment
+        const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.RAILWAY_ENVIRONMENT;
+        const useHeadless = isServerless; // Use headless in serverless environments
 
+        // Try to find system Chrome (only on Windows/Linux with Chrome installed)
         let chromePath: string | undefined;
-        for (const p of chromePaths) {
-          if (fs.existsSync(p)) {
-            chromePath = p;
-            break;
+        if (!isServerless) {
+          const chromePaths = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+          ].filter(p => p && fs.existsSync(p));
+
+          if (chromePaths.length > 0) {
+            chromePath = chromePaths[0];
+            log(`Using system Chrome: ${chromePath}`);
           }
         }
 
-        const profilePath = getBrowserProfilePath();
-        log(`Opening browser with profile: ${profilePath}`);
+        // If no system Chrome found, Playwright will use its bundled Chromium
+        if (!chromePath) {
+          log('No system Chrome found, using Playwright bundled Chromium');
+        }
 
-        browserContext = await chromium.launchPersistentContext(profilePath, {
-          headless: false,
-          executablePath: chromePath,
-          args: [
-            '--disable-blink-features=AutomationControlled',
-            '--no-sandbox',
-            '--window-size=1920,1080',
-          ],
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-          viewport: { width: 1920, height: 1080 },
-        });
+        const profilePath = getBrowserProfilePath();
+        log(`Opening browser with profile: ${profilePath} (headless: ${useHeadless})`);
+
+        try {
+          browserContext = await chromium.launchPersistentContext(profilePath, {
+            headless: useHeadless,
+            executablePath: chromePath, // undefined = use Playwright's bundled Chromium
+            args: [
+              '--disable-blink-features=AutomationControlled',
+              '--no-sandbox',
+              '--window-size=1920,1080',
+              '--disable-dev-shm-usage', // Helps with memory issues in containers
+              '--disable-gpu', // Helps in headless/server environments
+              '--disable-setuid-sandbox', // Additional sandbox flag for Linux
+            ],
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            viewport: { width: 1920, height: 1080 },
+          });
+        } catch (error: any) {
+          // Check if it's a browser installation error
+          if (error.message && (
+            error.message.includes('Executable doesn\'t exist') ||
+            error.message.includes('playwright install') ||
+            error.message.includes('browserType.launch') ||
+            error.message.includes('chromium')
+          )) {
+            log(`Browser installation error: ${error.message}`);
+            return NextResponse.json({
+              success: false,
+              error: 'Playwright browsers are not installed. Please run "npx playwright install chromium --with-deps" in your deployment environment. Note: Browser automation requires significant resources and may not work in all serverless environments.',
+              details: error.message,
+              suggestion: 'If deploying to Vercel, you may need to use a different hosting solution that supports long-running processes, or install browsers during the build process.'
+            });
+          }
+          throw error; // Re-throw if it's a different error
+        }
 
         currentPage = await browserContext.newPage();
 
