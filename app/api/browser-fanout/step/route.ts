@@ -181,7 +181,7 @@ function extractFanoutQueries(data: any): { queries: any[]; model: string } {
 
 export async function POST(request: NextRequest) {
   try {
-    const { action, query, conversationId } = await request.json();
+    const { action, query, conversationId, showBrowser } = await request.json();
 
     log(`Action: ${action}`);
 

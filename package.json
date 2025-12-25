@@ -26,9 +26,7 @@
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@types/xlsx": "^0.0.35"
-  },
-  "devDependencies": {
+    "@types/xlsx": "^0.0.35",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.0"
   }
