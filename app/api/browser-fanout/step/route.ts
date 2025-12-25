@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { chromium, BrowserContext, Page } from 'playwright';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 // Global state to maintain browser session across requests
 let browserContext: BrowserContext | null = null;
@@ -17,11 +18,32 @@ function log(message: string) {
 }
 
 function getBrowserProfilePath(): string {
-  const homeDir = process.env.USERPROFILE || process.env.HOME || '.';
-  const profileDir = path.join(homeDir, '.chatgpt-fanout-profile');
+  // Try to use home directory first (for local development)
+  let baseDir: string;
+  if (process.env.USERPROFILE) {
+    baseDir = process.env.USERPROFILE;
+  } else if (process.env.HOME) {
+    baseDir = process.env.HOME;
+  } else {
+    // Fallback to temp directory for deployed environments
+    baseDir = os.tmpdir();
+  }
 
-  if (!fs.existsSync(profileDir)) {
-    fs.mkdirSync(profileDir, { recursive: true });
+  const profileDir = path.join(baseDir, '.chatgpt-fanout-profile');
+
+  // Ensure parent directory exists and create profile directory
+  try {
+    if (!fs.existsSync(profileDir)) {
+      fs.mkdirSync(profileDir, { recursive: true });
+    }
+  } catch (error: any) {
+    // If that fails, try using temp directory with a unique name
+    log(`Failed to create profile in ${baseDir}, using temp directory: ${error.message}`);
+    const tempProfileDir = path.join(os.tmpdir(), `chatgpt-fanout-profile-${Date.now()}`);
+    if (!fs.existsSync(tempProfileDir)) {
+      fs.mkdirSync(tempProfileDir, { recursive: true });
+    }
+    return tempProfileDir;
   }
 
   return profileDir;
