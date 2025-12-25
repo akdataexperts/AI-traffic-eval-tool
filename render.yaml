@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-traffic-eval-tool
+    env: node
+    plan: starter  # Can upgrade to standard/pro for more resources
+    region: oregon  # Choose your preferred region
+    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Add your other environment variables here:
+      # - key: OPENAI_API_KEY
+      #   sync: false  # Set this in Render dashboard
+      # - key: PERPLEXITY_API_KEY
+      #   sync: false
+      # - key: GEMINI_API_KEY
+      #   sync: false
+      # - key: MONGODB_URI
+      #   sync: false
+
