@@ -200,8 +200,13 @@ export async function POST(request: NextRequest) {
         streamingComplete = false;
 
         // Determine if we're in a serverless/deployed environment
-        const isServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.RAILWAY_ENVIRONMENT;
-        const useHeadless = isServerless; // Use headless in serverless environments
+        const isServerless = !!process.env.VERCEL || 
+                            !!process.env.AWS_LAMBDA_FUNCTION_NAME || 
+                            !!process.env.RAILWAY_ENVIRONMENT ||
+                            !!process.env.RENDER; // Render environment
+        const useHeadless = isServerless || true; // Always use headless in deployed environments
+        log(`Environment detected: ${process.env.VERCEL ? 'Vercel' : process.env.RENDER ? 'Render' : process.env.RAILWAY_ENVIRONMENT ? 'Railway' : 'Local'}`);
+        log(`Using headless mode: ${useHeadless}`);
 
         // Try to find system Chrome (only on Windows/Linux with Chrome installed)
         let chromePath: string | undefined;
@@ -229,6 +234,34 @@ export async function POST(request: NextRequest) {
         const profilePath = getBrowserProfilePath();
         log(`Opening browser with profile: ${profilePath} (headless: ${useHeadless})`);
 
+        // Try to verify Playwright browsers are available
+        let playwrightExecutable: string | null = null;
+        try {
+          playwrightExecutable = await chromium.executablePath();
+          log(`Playwright Chromium executable path: ${playwrightExecutable}`);
+          if (!fs.existsSync(playwrightExecutable)) {
+            log(`WARNING: Playwright executable not found at: ${playwrightExecutable}`);
+            log(`Attempting to install browsers at runtime...`);
+            // Try to install browsers at runtime (this might work on Render)
+            const { execSync } = require('child_process');
+            try {
+              execSync('npx playwright install chromium', { 
+                stdio: 'inherit',
+                timeout: 300000 // 5 minutes
+              });
+              log(`✅ Browsers installed successfully at runtime`);
+              // Get the path again after installation
+              playwrightExecutable = await chromium.executablePath();
+            } catch (installError: any) {
+              log(`Failed to install browsers at runtime: ${installError.message}`);
+            }
+          } else {
+            log(`✅ Playwright executable found and verified`);
+          }
+        } catch (e: any) {
+          log(`WARNING: Could not get Playwright executable path: ${e.message}`);
+        }
+
         try {
           browserContext = await chromium.launchPersistentContext(profilePath, {
             headless: useHeadless,
@@ -244,23 +277,44 @@ export async function POST(request: NextRequest) {
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             viewport: { width: 1920, height: 1080 },
           });
+          log(`✅ Browser context created successfully`);
         } catch (error: any) {
+          // Log the full error for debugging
+          log(`Browser launch error: ${error.message}`);
+          log(`Error stack: ${error.stack || 'No stack trace'}`);
+          
           // Check if it's a browser installation error
           if (error.message && (
             error.message.includes('Executable doesn\'t exist') ||
             error.message.includes('playwright install') ||
             error.message.includes('browserType.launch') ||
-            error.message.includes('chromium')
+            error.message.includes('chromium') ||
+            error.message.includes('BrowserType')
           )) {
-            log(`Browser installation error: ${error.message}`);
+            // Try to provide more helpful error message
+            const isInstallError = error.message.includes('Executable doesn\'t exist') || 
+                                   error.message.includes('playwright install');
+            
             return NextResponse.json({
               success: false,
-              error: 'Playwright browsers are not installed. Please run "npx playwright install chromium --with-deps" in your deployment environment. Note: Browser automation requires significant resources and may not work in all serverless environments.',
+              error: isInstallError 
+                ? 'Playwright browsers are not installed. The browsers should be installed during build, but may not be available at runtime. Check Render logs to verify browser installation completed successfully.'
+                : `Browser launch failed: ${error.message}`,
               details: error.message,
-              suggestion: 'If deploying to Vercel, you may need to use a different hosting solution that supports long-running processes, or install browsers during the build process.'
+              errorType: isInstallError ? 'installation' : 'launch',
+              suggestion: isInstallError 
+                ? 'Verify that "npx playwright install chromium" completed successfully during build. Check Render build logs.'
+                : 'This may be a runtime issue. Check Render service logs for more details.'
             });
           }
-          throw error; // Re-throw if it's a different error
+          
+          // For other errors, return more details
+          return NextResponse.json({
+            success: false,
+            error: `Browser launch failed: ${error.message}`,
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+          });
         }
 
         currentPage = await browserContext.newPage();
