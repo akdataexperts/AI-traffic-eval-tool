@@ -11,6 +11,7 @@ let capturedJsonData: any = null;
 let capturedStreamingQueries: any[] = [];
 let capturedModel: string = 'unknown';
 let streamingComplete: boolean = false;
+let screenshots: Array<{ timestamp: string; step: string; image: string }> = [];
 
 function log(message: string) {
   const timestamp = new Date().toISOString();
@@ -204,9 +205,17 @@ export async function POST(request: NextRequest) {
                             !!process.env.AWS_LAMBDA_FUNCTION_NAME || 
                             !!process.env.RAILWAY_ENVIRONMENT ||
                             !!process.env.RENDER; // Render environment
-        const useHeadless = isServerless || true; // Always use headless in deployed environments
+        
+        // Allow showing browser if requested and not in strict serverless (Render can show browser with Xvfb)
+        // For Render, we'll use headless but capture screenshots
+        const userWantsVisible = showBrowser === true;
+        const useHeadless = isServerless && !userWantsVisible; // Use headless unless user wants visible AND it's possible
         log(`Environment detected: ${process.env.VERCEL ? 'Vercel' : process.env.RENDER ? 'Render' : process.env.RAILWAY_ENVIRONMENT ? 'Railway' : 'Local'}`);
+        log(`User requested visible browser: ${userWantsVisible}`);
         log(`Using headless mode: ${useHeadless}`);
+        
+        // Reset screenshots for new session
+        screenshots = [];
 
         // Try to find system Chrome (only on Windows/Linux with Chrome installed)
         let chromePath: string | undefined;
@@ -278,6 +287,22 @@ export async function POST(request: NextRequest) {
             viewport: { width: 1920, height: 1080 },
           });
           log(`✅ Browser context created successfully`);
+          
+          currentPage = await browserContext.newPage();
+          
+          // Capture initial screenshot after page is created
+          try {
+            await currentPage.goto('about:blank');
+            const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
+            screenshots.push({
+              timestamp: new Date().toISOString(),
+              step: 'Browser opened',
+              image: screenshot.toString('base64')
+            });
+            log('Initial screenshot captured');
+          } catch (e: any) {
+            log(`Could not capture initial screenshot: ${e.message}`);
+          }
         } catch (error: any) {
           // Log the full error for debugging
           log(`Browser launch error: ${error.message}`);
@@ -429,6 +454,20 @@ export async function POST(request: NextRequest) {
 
         log(`Navigating to: ${url}`);
         await currentPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        
+        // Capture screenshot after navigation
+        try {
+          await currentPage.waitForTimeout(2000); // Wait for page to settle
+          const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
+          screenshots.push({
+            timestamp: new Date().toISOString(),
+            step: 'Navigated to ChatGPT',
+            image: screenshot.toString('base64')
+          });
+          log('Screenshot captured after navigation');
+        } catch (e: any) {
+          log(`Could not capture navigation screenshot: ${e.message}`);
+        }
 
         // Logs to return to client
         const submissionLogs: string[] = [];
@@ -520,7 +559,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: 'Browser opened',
-          data: { url, logs: submissionLogs }
+          data: { 
+            url, 
+            logs: submissionLogs,
+            screenshots: screenshots,
+            headless: useHeadless
+          }
         });
       }
 
@@ -575,6 +619,23 @@ export async function POST(request: NextRequest) {
           }
 
           log(`Streaming queries captured so far: ${capturedStreamingQueries.length}`);
+          
+          // Capture screenshot of current state
+          let currentScreenshot: string | null = null;
+          if (currentPage) {
+            try {
+              const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
+              currentScreenshot = screenshot.toString('base64');
+              screenshots.push({
+                timestamp: new Date().toISOString(),
+                step: isGenerating ? 'Response generating' : 'Response complete',
+                image: currentScreenshot
+              });
+              log('Screenshot captured of current state');
+            } catch (e: any) {
+              log(`Could not capture screenshot: ${e.message}`);
+            }
+          }
 
           return NextResponse.json({
             success: true,
@@ -585,7 +646,9 @@ export async function POST(request: NextRequest) {
               currentUrl,
               streamingQueries: capturedStreamingQueries,
               streamingComplete,
-              model: capturedModel
+              model: capturedModel,
+              screenshot: currentScreenshot,
+              screenshots: screenshots
             }
           });
         } else {

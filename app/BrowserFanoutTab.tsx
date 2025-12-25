@@ -33,6 +33,8 @@ export default function BrowserFanoutTab() {
   const [stepLogs, setStepLogs] = useState<string[]>([]);
   const [dataSource, setDataSource] = useState<string | null>(null);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const [screenshots, setScreenshots] = useState<Array<{ timestamp: string; step: string; image: string }>>([]);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   const addLog = (message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -48,6 +50,7 @@ export default function BrowserFanoutTab() {
     setStepLogs([]);
     setError(null);
     setDataSource(null);
+    setScreenshots([]);
   };
 
   // Step 1: Open Browser
@@ -77,8 +80,16 @@ export default function BrowserFanoutTab() {
       }
 
       setBrowserOpen(true);
+      if (data.data?.screenshots && data.data.screenshots.length > 0) {
+        setScreenshots(data.data.screenshots);
+      }
       addLog(`✅ Browser opened successfully`);
       addLog(`Navigating to: ${data.data?.url}`);
+      if (data.data?.headless === false) {
+        addLog(`👁️ Browser is visible - you can see what's happening!`);
+      } else {
+        addLog(`📸 Screenshots will be captured to show progress`);
+      }
       addLog(`⚠️ If not logged in, please log in to ChatGPT`);
       addLog(`⏳ Wait for ChatGPT to finish, then click "Check Response"`);
     } catch (err: any) {
@@ -808,6 +819,34 @@ export default function BrowserFanoutTab() {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
           <p className="text-red-700">{error}</p>
+        </div>
+      )}
+
+      {/* Screenshots Display */}
+      {screenshots.length > 0 && (
+        <div className="bg-white rounded-lg shadow-lg p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">
+            📸 Browser Screenshots ({screenshots.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {screenshots.map((screenshot, index) => (
+              <div key={index} className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                  <div className="text-sm font-medium text-gray-700">{screenshot.step}</div>
+                  <div className="text-xs text-gray-500">
+                    {new Date(screenshot.timestamp).toLocaleTimeString()}
+                  </div>
+                </div>
+                <div className="bg-gray-100 p-2">
+                  <img
+                    src={`data:image/png;base64,${screenshot.image}`}
+                    alt={screenshot.step}
+                    className="w-full h-auto rounded border border-gray-300 shadow-sm"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
