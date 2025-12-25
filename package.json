@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright browser installation skipped or failed'",
-    "render-build": "npm install && npx playwright install chromium --with-deps && npm run build"
+    "postinstall": "npx playwright install chromium || echo 'Playwright browser installation skipped or failed'",
+    "render-build": "npm install && npx playwright install chromium && npm run build"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

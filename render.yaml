@@ -4,7 +4,7 @@ services:
     env: node
     plan: starter  # Can upgrade to standard/pro for more resources
     region: oregon  # Choose your preferred region
-    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
+    buildCommand: npm install && npx playwright install chromium && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV

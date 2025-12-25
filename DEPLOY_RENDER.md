@@ -37,6 +37,7 @@ This guide will help you deploy the AI Traffic Eval Tool to Render, which suppor
    - The build process will:
      - Install dependencies
      - Install Playwright Chromium browser (~300MB, takes 3-5 minutes)
+       - Note: We use `playwright install chromium` (without `--with-deps`) because Render doesn't allow root access for system dependencies
      - Build your Next.js app
    - First deployment may take 10-15 minutes
 
@@ -55,7 +56,7 @@ This guide will help you deploy the AI Traffic Eval Tool to Render, which suppor
    - **Root Directory**: Leave empty (root of repo)
    - **Build Command**: 
      ```
-     npm install && npx playwright install chromium --with-deps && npm run build
+     npm install && npx playwright install chromium && npm run build
      ```
    - **Start Command**: 
      ```
