@@ -287,22 +287,6 @@ export async function POST(request: NextRequest) {
             viewport: { width: 1920, height: 1080 },
           });
           log(`✅ Browser context created successfully`);
-          
-          currentPage = await browserContext.newPage();
-          
-          // Capture initial screenshot after page is created
-          try {
-            await currentPage.goto('about:blank');
-            const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
-            screenshots.push({
-              timestamp: new Date().toISOString(),
-              step: 'Browser opened',
-              image: screenshot.toString('base64')
-            });
-            log('Initial screenshot captured');
-          } catch (e: any) {
-            log(`Could not capture initial screenshot: ${e.message}`);
-          }
         } catch (error: any) {
           // Log the full error for debugging
           log(`Browser launch error: ${error.message}`);
@@ -651,19 +635,85 @@ export async function POST(request: NextRequest) {
               screenshots: screenshots
             }
           });
-        } else {
-          log('No conversation ID found in URL yet');
-          return NextResponse.json({
-            success: true,
-            message: 'No conversation yet',
-            data: {
-              conversationId: null,
-              currentUrl,
-              streamingQueries: capturedStreamingQueries,
-              streamingComplete: false
-            }
-          });
-        }
+         } else {
+           log('No conversation ID found in URL yet');
+           
+           // Check what page we're on and provide more context
+           let pageStatus = 'unknown';
+           let needsAction = false;
+           let actionMessage = '';
+           
+           try {
+             const pageInfo = await currentPage.evaluate(() => {
+               const url = window.location.href;
+               const hasTextarea = !!document.querySelector('textarea, #prompt-textarea');
+               const hasLoginButton = !!document.querySelector('button:has-text("Log in"), a[href*="login"]');
+               const hasSubmitButton = !!document.querySelector('button[data-testid="send-button"], button[aria-label*="Send"]');
+               const submitButtonDisabled = document.querySelector('button[data-testid="send-button"]')?.hasAttribute('disabled');
+               
+               return {
+                 url,
+                 hasTextarea,
+                 hasLoginButton,
+                 hasSubmitButton,
+                 submitButtonDisabled,
+                 title: document.title
+               };
+             });
+             
+             if (currentUrl.includes('/auth/login') || pageInfo.hasLoginButton) {
+               pageStatus = 'login_required';
+               needsAction = true;
+               actionMessage = 'Please log in to ChatGPT';
+             } else if (pageInfo.hasTextarea && !pageInfo.hasSubmitButton) {
+               pageStatus = 'loading';
+               actionMessage = 'Page is still loading, please wait';
+             } else if (pageInfo.hasTextarea && pageInfo.submitButtonDisabled) {
+               pageStatus = 'query_not_submitted';
+               needsAction = true;
+               actionMessage = 'Query may not have been submitted. The submit button appears disabled.';
+             } else if (pageInfo.hasTextarea) {
+               pageStatus = 'ready';
+               actionMessage = 'Page is ready, waiting for query submission or response';
+             } else {
+               pageStatus = 'unknown';
+               actionMessage = 'Unknown page state';
+             }
+             
+             log(`Page status: ${pageStatus} - ${actionMessage}`);
+           } catch (e: any) {
+             log(`Could not evaluate page state: ${e.message}`);
+           }
+           
+           // Capture screenshot to help debug
+           let currentScreenshot: string | null = null;
+           try {
+             const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
+             currentScreenshot = screenshot.toString('base64');
+             screenshots.push({
+               timestamp: new Date().toISOString(),
+               step: `Waiting for response - ${pageStatus}`,
+               image: currentScreenshot
+             });
+           } catch (e: any) {
+             log(`Could not capture screenshot: ${e.message}`);
+           }
+           
+           return NextResponse.json({
+             success: true,
+             message: 'No conversation yet',
+             data: {
+               conversationId: null,
+               currentUrl,
+               streamingQueries: capturedStreamingQueries,
+               streamingComplete: false,
+               pageStatus,
+               needsAction,
+               actionMessage,
+               screenshot: currentScreenshot
+             }
+           });
+         }
       }
 
       case 'get-streaming-data': {

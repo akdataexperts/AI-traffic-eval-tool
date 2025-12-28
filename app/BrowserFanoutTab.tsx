@@ -421,6 +421,24 @@ export default function BrowserFanoutTab() {
           addLog(`📋 Step 3: Trying extraction without refresh first...`);
           break;
         } else {
+          // No conversation ID yet - check page status
+          if (checkData.data?.pageStatus) {
+            addLog(`📄 Page status: ${checkData.data.pageStatus}`);
+            if (checkData.data?.actionMessage) {
+              addLog(`ℹ️ ${checkData.data.actionMessage}`);
+            }
+            if (checkData.data?.needsAction) {
+              addLog(`⚠️ Action needed: ${checkData.data.actionMessage}`);
+              // If login is required, pause auto-run
+              if (checkData.data.pageStatus === 'login_required') {
+                addLog(`⏸️ Auto-run paused. Please log in to ChatGPT manually, then click "Auto Run" again.`);
+                setIsAutoRunning(false);
+                setIsLoading(false);
+                setCurrentStep('');
+                return;
+              }
+            }
+          }
           // Still waiting for response
           await wait(3000);
         }
