@@ -82,13 +82,14 @@ export default function BrowserFanoutTab() {
       setBrowserOpen(true);
       if (data.data?.screenshots && data.data.screenshots.length > 0) {
         setScreenshots(data.data.screenshots);
+        addLog(`📸 Captured ${data.data.screenshots.length} initial screenshot(s)`);
       }
       addLog(`✅ Browser opened successfully`);
       addLog(`Navigating to: ${data.data?.url}`);
       if (data.data?.headless === false) {
         addLog(`👁️ Browser is visible - you can see what's happening!`);
       } else {
-        addLog(`📸 Screenshots will be captured to show progress`);
+        addLog(`📸 Screenshots will be captured to show what the browser sees`);
       }
       addLog(`⚠️ If not logged in, please log in to ChatGPT`);
       addLog(`⏳ Wait for ChatGPT to finish, then click "Check Response"`);
@@ -439,6 +440,42 @@ export default function BrowserFanoutTab() {
               }
             }
           }
+          
+          // Update screenshots if provided (capture every 5 attempts to show progress, or if page status changed)
+          if (checkData.data?.screenshot) {
+            // Capture screenshot every 5 attempts, or if it's the first one, or if page status indicates something important
+            const shouldCapture = attempts === 1 || 
+                                 attempts % 5 === 0 || 
+                                 (checkData.data?.pageStatus && ['login_required', 'query_not_submitted'].includes(checkData.data.pageStatus));
+            
+            if (shouldCapture) {
+              setScreenshots(prev => {
+                // Check if we already have a recent screenshot with the same image to avoid duplicates
+                const recentScreenshot = prev.length > 0 ? prev[prev.length - 1] : null;
+                const isDuplicate = recentScreenshot && recentScreenshot.image === checkData.data.screenshot;
+                
+                if (!isDuplicate) {
+                  const stepName = checkData.data?.pageStatus 
+                    ? `Attempt ${attempts} - ${checkData.data.pageStatus}`
+                    : `Checking... (attempt ${attempts})`;
+                  return [...prev, {
+                    timestamp: new Date().toISOString(),
+                    step: stepName,
+                    image: checkData.data.screenshot
+                  }];
+                }
+                return prev;
+              });
+            }
+          }
+          if (checkData.data?.screenshots && Array.isArray(checkData.data.screenshots)) {
+            setScreenshots(prev => {
+              const existing = new Set(prev.map(s => s.timestamp));
+              const newScreenshots = checkData.data.screenshots.filter((s: any) => !existing.has(s.timestamp));
+              return [...prev, ...newScreenshots];
+            });
+          }
+          
           // Still waiting for response
           await wait(3000);
         }
@@ -840,31 +877,44 @@ export default function BrowserFanoutTab() {
         </div>
       )}
 
-      {/* Screenshots Display */}
+      {/* Screenshots Display - Show prominently */}
       {screenshots.length > 0 && (
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">
-            📸 Browser Screenshots ({screenshots.length})
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-orange-200">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-800">
+              📸 Browser View ({screenshots.length} screenshot{screenshots.length !== 1 ? 's' : ''})
+            </h3>
+            <span className="text-xs text-gray-500">
+              Latest: {new Date(screenshots[screenshots.length - 1].timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {screenshots.map((screenshot, index) => (
-              <div key={index} className="border border-gray-200 rounded-lg overflow-hidden">
-                <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                  <div className="text-sm font-medium text-gray-700">{screenshot.step}</div>
+              <div key={index} className="border-2 border-gray-300 rounded-lg overflow-hidden hover:border-orange-400 transition-colors">
+                <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-4 py-2 border-b border-gray-200">
+                  <div className="text-sm font-medium text-gray-800">{screenshot.step}</div>
                   <div className="text-xs text-gray-500">
                     {new Date(screenshot.timestamp).toLocaleTimeString()}
                   </div>
                 </div>
-                <div className="bg-gray-100 p-2">
+                <div className="bg-gray-900 p-2">
                   <img
                     src={`data:image/png;base64,${screenshot.image}`}
                     alt={screenshot.step}
-                    className="w-full h-auto rounded border border-gray-300 shadow-sm"
+                    className="w-full h-auto rounded border border-gray-600 shadow-lg"
+                    loading="lazy"
                   />
                 </div>
               </div>
             ))}
           </div>
+          {screenshots.length > 0 && (
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-700">
+                💡 <strong>Tip:</strong> Screenshots show what the browser sees. The latest screenshot is at the end.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

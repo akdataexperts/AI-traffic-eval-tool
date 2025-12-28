@@ -439,18 +439,32 @@ export async function POST(request: NextRequest) {
         log(`Navigating to: ${url}`);
         await currentPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
         
-        // Capture screenshot after navigation
+        // Capture screenshot immediately after navigation
         try {
-          await currentPage.waitForTimeout(2000); // Wait for page to settle
+          await currentPage.waitForTimeout(1000); // Brief wait for page to start loading
           const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
           screenshots.push({
             timestamp: new Date().toISOString(),
             step: 'Navigated to ChatGPT',
             image: screenshot.toString('base64')
           });
-          log('Screenshot captured after navigation');
+          log('📸 Screenshot captured: Navigated to ChatGPT');
         } catch (e: any) {
           log(`Could not capture navigation screenshot: ${e.message}`);
+        }
+        
+        // Capture another screenshot after page settles
+        try {
+          await currentPage.waitForTimeout(2000); // Wait for page to settle more
+          const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
+          screenshots.push({
+            timestamp: new Date().toISOString(),
+            step: 'ChatGPT page loaded',
+            image: screenshot.toString('base64')
+          });
+          log('📸 Screenshot captured: ChatGPT page loaded');
+        } catch (e: any) {
+          log(`Could not capture page load screenshot: ${e.message}`);
         }
 
         // Logs to return to client
@@ -610,12 +624,13 @@ export async function POST(request: NextRequest) {
             try {
               const screenshot = await currentPage.screenshot({ type: 'png', fullPage: false });
               currentScreenshot = screenshot.toString('base64');
+              const stepName = isGenerating ? 'Response generating' : 'Response complete';
               screenshots.push({
                 timestamp: new Date().toISOString(),
-                step: isGenerating ? 'Response generating' : 'Response complete',
+                step: stepName,
                 image: currentScreenshot
               });
-              log('Screenshot captured of current state');
+              log(`Screenshot captured: ${stepName}`);
             } catch (e: any) {
               log(`Could not capture screenshot: ${e.message}`);
             }
