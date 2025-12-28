@@ -85,14 +85,18 @@ export default function BrowserFanoutTab() {
         addLog(`📸 Captured ${data.data.screenshots.length} initial screenshot(s)`);
       }
       addLog(`✅ Browser opened successfully`);
-      addLog(`Navigating to: ${data.data?.url}`);
-      if (data.data?.headless === false) {
-        addLog(`👁️ Browser is visible - you can see what's happening!`);
+      
+      // Show browser mode
+      if (data.data?.usingBrowserless) {
+        addLog(`🌐 Using Browserless.io cloud browser (stealth mode enabled)`);
+        addLog(`✅ Better anti-detection - less likely to trigger Cloudflare`);
       } else {
-        addLog(`📸 Screenshots will be captured to show what the browser sees`);
+        addLog(`💻 Using local Playwright browser`);
       }
-      addLog(`⚠️ If not logged in, please log in to ChatGPT`);
-      addLog(`⏳ Wait for ChatGPT to finish, then click "Check Response"`);
+      
+      addLog(`Navigating to: ${data.data?.url}`);
+      addLog(`📸 Screenshots will be captured to show browser activity`);
+      addLog(`⏳ Wait for ChatGPT to respond, then click "Check Response"`);
     } catch (err: any) {
       setError(err.message);
       addLog(`Error: ${err.message}`);
@@ -636,17 +640,25 @@ export default function BrowserFanoutTab() {
         <p className="text-xs text-green-700 mt-3 font-medium">
           ✨ <strong>New:</strong> Queries are now captured as ChatGPT responds - often no refresh needed!
         </p>
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3">
-          <p className="text-xs text-blue-800 font-semibold mb-1">🔐 Authentication:</p>
+        
+        {/* Browserless.io Info */}
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mt-3">
+          <p className="text-xs text-purple-800 font-semibold mb-1">🌐 Cloud Browser (Browserless.io):</p>
+          <p className="text-xs text-purple-700">
+            Set <code className="bg-purple-100 px-1 rounded">BROWSERLESS_TOKEN</code> in environment variables to use Browserless.io cloud browser.
+            This provides <strong>stealth mode</strong> to avoid Cloudflare detection!
+          </p>
+          <p className="text-xs text-purple-600 mt-1">
+            Get your token at <a href="https://browserless.io" target="_blank" rel="noopener noreferrer" className="underline font-medium">browserless.io</a> (free tier: 1,000 sessions/month)
+          </p>
+        </div>
+        
+        {/* Session Token Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-2">
+          <p className="text-xs text-blue-800 font-semibold mb-1">🔐 ChatGPT Authentication:</p>
           <p className="text-xs text-blue-700">
-            <strong>Option 1 (Recommended):</strong> Set <code className="bg-blue-100 px-1 rounded">CHATGPT_SESSION_TOKEN</code> environment variable in Render dashboard. 
-            The browser will auto-authenticate using your session token.
-          </p>
-          <p className="text-xs text-blue-700 mt-1">
-            <strong>Option 2:</strong> First-time use will prompt for login. Your session will be saved in the browser profile for future runs.
-          </p>
-          <p className="text-xs text-blue-600 mt-2">
-            💡 <strong>How to get session token:</strong> Log in to ChatGPT in your browser, open DevTools → Application → Cookies → Copy the <code className="bg-blue-100 px-1 rounded">__Secure-next-auth.session-token</code> value.
+            Set <code className="bg-blue-100 px-1 rounded">CHATGPT_SESSION_TOKEN</code> for auto-login.
+            Get it from ChatGPT cookies: DevTools → Application → Cookies → <code className="bg-blue-100 px-1 rounded">__Secure-next-auth.session-token</code>
           </p>
         </div>
       </div>

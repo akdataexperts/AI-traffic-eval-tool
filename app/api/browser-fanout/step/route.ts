@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { chromium, BrowserContext, Page } from 'playwright';
+import { chromium, BrowserContext, Page, Browser } from 'playwright';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
 // Global state to maintain browser session across requests
+let browser: Browser | null = null; // For Browserless connection
 let browserContext: BrowserContext | null = null;
 let currentPage: Page | null = null;
 let capturedJsonData: any = null;
@@ -12,6 +13,7 @@ let capturedStreamingQueries: any[] = [];
 let capturedModel: string = 'unknown';
 let streamingComplete: boolean = false;
 let screenshots: Array<{ timestamp: string; step: string; image: string }> = [];
+let usingBrowserless: boolean = false;
 
 function log(message: string) {
   const timestamp = new Date().toISOString();
@@ -193,142 +195,143 @@ export async function POST(request: NextRequest) {
             await browserContext.close();
           } catch (e) { }
         }
+        if (browser) {
+          try {
+            await browser.close();
+          } catch (e) { }
+        }
 
         // Reset all captured data
         capturedJsonData = null;
         capturedStreamingQueries = [];
         capturedModel = 'unknown';
         streamingComplete = false;
-
-        // Determine if we're in a serverless/deployed environment
-        const isServerless = !!process.env.VERCEL || 
-                            !!process.env.AWS_LAMBDA_FUNCTION_NAME || 
-                            !!process.env.RAILWAY_ENVIRONMENT ||
-                            !!process.env.RENDER; // Render environment
-        
-        // Allow showing browser if requested and not in strict serverless (Render can show browser with Xvfb)
-        // For Render, we'll use headless but capture screenshots
-        const userWantsVisible = showBrowser === true;
-        const useHeadless = isServerless && !userWantsVisible; // Use headless unless user wants visible AND it's possible
-        log(`Environment detected: ${process.env.VERCEL ? 'Vercel' : process.env.RENDER ? 'Render' : process.env.RAILWAY_ENVIRONMENT ? 'Railway' : 'Local'}`);
-        log(`User requested visible browser: ${userWantsVisible}`);
-        log(`Using headless mode: ${useHeadless}`);
+        usingBrowserless = false;
         
         // Reset screenshots for new session
         screenshots = [];
 
-        // Try to find system Chrome (only on Windows/Linux with Chrome installed)
-        let chromePath: string | undefined;
-        if (!isServerless) {
-          const chromePaths = [
-            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-            process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
-            '/usr/bin/google-chrome',
-            '/usr/bin/chromium',
-            '/usr/bin/chromium-browser',
-          ].filter(p => p && fs.existsSync(p));
-
-          if (chromePaths.length > 0) {
-            chromePath = chromePaths[0];
-            log(`Using system Chrome: ${chromePath}`);
-          }
-        }
-
-        // If no system Chrome found, Playwright will use its bundled Chromium
-        if (!chromePath) {
-          log('No system Chrome found, using Playwright bundled Chromium');
-        }
-
-        const profilePath = getBrowserProfilePath();
-        log(`Opening browser with profile: ${profilePath} (headless: ${useHeadless})`);
-
-        // Try to verify Playwright browsers are available
-        let playwrightExecutable: string | null = null;
-        try {
-          playwrightExecutable = await chromium.executablePath();
-          log(`Playwright Chromium executable path: ${playwrightExecutable}`);
-          if (!fs.existsSync(playwrightExecutable)) {
-            log(`WARNING: Playwright executable not found at: ${playwrightExecutable}`);
-            log(`Attempting to install browsers at runtime...`);
-            // Try to install browsers at runtime (this might work on Render)
-            const { execSync } = require('child_process');
-            try {
-              execSync('npx playwright install chromium', { 
-                stdio: 'inherit',
-                timeout: 300000 // 5 minutes
-              });
-              log(`✅ Browsers installed successfully at runtime`);
-              // Get the path again after installation
-              playwrightExecutable = await chromium.executablePath();
-            } catch (installError: any) {
-              log(`Failed to install browsers at runtime: ${installError.message}`);
-            }
-          } else {
-            log(`✅ Playwright executable found and verified`);
-          }
-        } catch (e: any) {
-          log(`WARNING: Could not get Playwright executable path: ${e.message}`);
-        }
-
-        try {
-          browserContext = await chromium.launchPersistentContext(profilePath, {
-            headless: useHeadless,
-            executablePath: chromePath, // undefined = use Playwright's bundled Chromium
-            args: [
-              '--disable-blink-features=AutomationControlled',
-              '--no-sandbox',
-              '--window-size=1920,1080',
-              '--disable-dev-shm-usage', // Helps with memory issues in containers
-              '--disable-gpu', // Helps in headless/server environments
-              '--disable-setuid-sandbox', // Additional sandbox flag for Linux
-            ],
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            viewport: { width: 1920, height: 1080 },
-          });
-          log(`✅ Browser context created successfully`);
-        } catch (error: any) {
-          // Log the full error for debugging
-          log(`Browser launch error: ${error.message}`);
-          log(`Error stack: ${error.stack || 'No stack trace'}`);
+        // Check if Browserless.io token is available
+        const browserlessToken = process.env.BROWSERLESS_TOKEN;
+        
+        if (browserlessToken) {
+          // ============================================
+          // BROWSERLESS.IO MODE - Cloud Browser Service
+          // ============================================
+          log('🌐 Browserless.io token found - connecting to cloud browser...');
+          usingBrowserless = true;
           
-          // Check if it's a browser installation error
-          if (error.message && (
-            error.message.includes('Executable doesn\'t exist') ||
-            error.message.includes('playwright install') ||
-            error.message.includes('browserType.launch') ||
-            error.message.includes('chromium') ||
-            error.message.includes('BrowserType')
-          )) {
-            // Try to provide more helpful error message
-            const isInstallError = error.message.includes('Executable doesn\'t exist') || 
-                                   error.message.includes('playwright install');
+          try {
+            // Connect to Browserless via CDP
+            const browserlessUrl = `wss://chrome.browserless.io?token=${browserlessToken}&stealth=true`;
+            log(`Connecting to Browserless...`);
             
+            browser = await chromium.connectOverCDP(browserlessUrl, {
+              timeout: 60000
+            });
+            
+            log('✅ Connected to Browserless.io cloud browser');
+            
+            // Create a new context with anti-detection settings
+            browserContext = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              viewport: { width: 1920, height: 1080 },
+              locale: 'en-US',
+              timezoneId: 'America/New_York',
+            });
+            
+            log('✅ Browser context created on Browserless');
+            
+          } catch (error: any) {
+            log(`Browserless connection error: ${error.message}`);
             return NextResponse.json({
               success: false,
-              error: isInstallError 
-                ? 'Playwright browsers are not installed. The browsers should be installed during build, but may not be available at runtime. Check Render logs to verify browser installation completed successfully.'
-                : `Browser launch failed: ${error.message}`,
+              error: `Failed to connect to Browserless.io: ${error.message}`,
               details: error.message,
-              errorType: isInstallError ? 'installation' : 'launch',
-              suggestion: isInstallError 
-                ? 'Verify that "npx playwright install chromium" completed successfully during build. Check Render build logs.'
-                : 'This may be a runtime issue. Check Render service logs for more details.'
+              suggestion: 'Check your BROWSERLESS_TOKEN is correct and you have available sessions.'
             });
           }
           
-          // For other errors, return more details
-          return NextResponse.json({
-            success: false,
-            error: `Browser launch failed: ${error.message}`,
-            details: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-          });
+        } else {
+          // ============================================
+          // LOCAL BROWSER MODE - Fallback
+          // ============================================
+          log('ℹ️ No BROWSERLESS_TOKEN found - using local browser');
+          
+          // Determine if we're in a serverless/deployed environment
+          const isServerless = !!process.env.VERCEL || 
+                              !!process.env.AWS_LAMBDA_FUNCTION_NAME || 
+                              !!process.env.RAILWAY_ENVIRONMENT ||
+                              !!process.env.RENDER;
+          
+          const userWantsVisible = showBrowser === true;
+          const useHeadless = isServerless && !userWantsVisible;
+          log(`Environment: ${process.env.RENDER ? 'Render' : process.env.VERCEL ? 'Vercel' : 'Local'}`);
+          log(`Using headless mode: ${useHeadless}`);
+
+          // Try to find system Chrome
+          let chromePath: string | undefined;
+          if (!isServerless) {
+            const chromePaths = [
+              'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+              'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+              process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+              '/usr/bin/google-chrome',
+              '/usr/bin/chromium',
+              '/usr/bin/chromium-browser',
+            ].filter(p => p && fs.existsSync(p));
+
+            if (chromePaths.length > 0) {
+              chromePath = chromePaths[0];
+              log(`Using system Chrome: ${chromePath}`);
+            }
+          }
+
+          const profilePath = getBrowserProfilePath();
+          log(`Opening browser with profile: ${profilePath}`);
+
+          try {
+            browserContext = await chromium.launchPersistentContext(profilePath, {
+              headless: useHeadless,
+              executablePath: chromePath,
+              args: [
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--window-size=1920,1080',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-setuid-sandbox',
+              ],
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              viewport: { width: 1920, height: 1080 },
+            });
+            log(`✅ Local browser context created successfully`);
+          } catch (error: any) {
+            log(`Browser launch error: ${error.message}`);
+            
+            if (error.message && (
+              error.message.includes('Executable doesn\'t exist') ||
+              error.message.includes('playwright install')
+            )) {
+              return NextResponse.json({
+                success: false,
+                error: 'Playwright browsers not installed. Consider using Browserless.io for cloud deployment.',
+                details: error.message,
+                suggestion: 'Set BROWSERLESS_TOKEN environment variable to use cloud browser instead.'
+              });
+            }
+            
+            return NextResponse.json({
+              success: false,
+              error: `Browser launch failed: ${error.message}`,
+              details: error.message
+            });
+          }
         }
 
         currentPage = await browserContext.newPage();
         
-        // Check if we have existing cookies in the profile (from previous sessions)
+        // Check if we have existing cookies
         try {
           const cookies = await browserContext.cookies();
           const hasAuthCookie = cookies.some(c => 
@@ -337,12 +340,12 @@ export async function POST(request: NextRequest) {
             c.domain.includes('chatgpt.com')
           );
           if (hasAuthCookie) {
-            log(`✅ Found existing authentication cookies in browser profile`);
+            log(`✅ Found existing authentication cookies`);
           } else {
-            log(`ℹ️ No existing authentication cookies found - will use session token if provided`);
+            log(`ℹ️ No existing authentication cookies found`);
           }
         } catch (e: any) {
-          log(`Could not check existing cookies: ${e.message}`);
+          log(`Could not check cookies: ${e.message}`);
         }
 
         // Set up streaming response capture BEFORE navigation using route
@@ -612,7 +615,8 @@ export async function POST(request: NextRequest) {
             url, 
             logs: submissionLogs,
             screenshots: screenshots,
-            headless: useHeadless
+            usingBrowserless: usingBrowserless,
+            browserMode: usingBrowserless ? 'Browserless.io (Cloud)' : 'Local Playwright'
           }
         });
       }
@@ -1010,13 +1014,22 @@ export async function POST(request: NextRequest) {
             await browserContext.close();
           } catch (e) { }
         }
+        
+        // Also close the browser connection (for Browserless)
+        if (browser) {
+          try {
+            await browser.close();
+          } catch (e) { }
+        }
 
+        browser = null;
         browserContext = null;
         currentPage = null;
         capturedJsonData = null;
         capturedStreamingQueries = [];
         capturedModel = 'unknown';
         streamingComplete = false;
+        usingBrowserless = false;
 
         return NextResponse.json({
           success: true,

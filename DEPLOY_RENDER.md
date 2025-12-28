@@ -30,7 +30,38 @@ This guide will help you deploy the AI Traffic Eval Tool to Render, which suppor
      - `PERPLEXITY_API_KEY` (if using Perplexity)
      - `GEMINI_API_KEY` (if using Gemini)
      - `MONGODB_URI` (if using MongoDB)
-     - Any other API keys your app needs
+     - **`BROWSERLESS_TOKEN`** (RECOMMENDED for Browser Fanout - see below)
+     - `CHATGPT_SESSION_TOKEN` (optional - for ChatGPT auto-login)
+
+## Browser Fanout Configuration (Recommended)
+
+The Browser Fanout feature works best with **Browserless.io** - a cloud browser service that avoids Cloudflare detection.
+
+### Setting up Browserless.io
+
+1. **Sign up at [browserless.io](https://browserless.io)**
+   - Free tier: 1,000 browser sessions/month
+   - Paid plans available for more usage
+
+2. **Get your API token**
+   - Go to your Browserless dashboard
+   - Copy your API token
+
+3. **Add to Render environment variables**
+   - `BROWSERLESS_TOKEN` = your-browserless-api-token
+
+### Benefits of Browserless.io
+- ✅ **Stealth mode** - Avoids Cloudflare bot detection
+- ✅ **No local browser needed** - Works in any cloud environment
+- ✅ **Better IP reputation** - Less likely to be blocked
+- ✅ **Persistent sessions** - Can maintain login state
+
+### Optional: ChatGPT Auto-Login
+To skip manual login every time:
+1. Log in to ChatGPT in your browser
+2. Open DevTools (F12) → Application → Cookies
+3. Copy the value of `__Secure-next-auth.session-token`
+4. Add to Render: `CHATGPT_SESSION_TOKEN` = (your token)
 
 4. **Deploy**
    - Render will automatically start building and deploying
