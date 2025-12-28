@@ -636,9 +636,19 @@ export default function BrowserFanoutTab() {
         <p className="text-xs text-green-700 mt-3 font-medium">
           ✨ <strong>New:</strong> Queries are now captured as ChatGPT responds - often no refresh needed!
         </p>
-        <p className="text-xs text-orange-600 mt-2">
-          ⚠️ First time? Log in to ChatGPT in the browser. Your session will be saved.
-        </p>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-3">
+          <p className="text-xs text-blue-800 font-semibold mb-1">🔐 Authentication:</p>
+          <p className="text-xs text-blue-700">
+            <strong>Option 1 (Recommended):</strong> Set <code className="bg-blue-100 px-1 rounded">CHATGPT_SESSION_TOKEN</code> environment variable in Render dashboard. 
+            The browser will auto-authenticate using your session token.
+          </p>
+          <p className="text-xs text-blue-700 mt-1">
+            <strong>Option 2:</strong> First-time use will prompt for login. Your session will be saved in the browser profile for future runs.
+          </p>
+          <p className="text-xs text-blue-600 mt-2">
+            💡 <strong>How to get session token:</strong> Log in to ChatGPT in your browser, open DevTools → Application → Cookies → Copy the <code className="bg-blue-100 px-1 rounded">__Secure-next-auth.session-token</code> value.
+          </p>
+        </div>
       </div>
 
       {/* Query Input */}

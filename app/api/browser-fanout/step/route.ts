@@ -327,6 +327,23 @@ export async function POST(request: NextRequest) {
         }
 
         currentPage = await browserContext.newPage();
+        
+        // Check if we have existing cookies in the profile (from previous sessions)
+        try {
+          const cookies = await browserContext.cookies();
+          const hasAuthCookie = cookies.some(c => 
+            c.name.includes('session-token') || 
+            c.name.includes('auth') ||
+            c.domain.includes('chatgpt.com')
+          );
+          if (hasAuthCookie) {
+            log(`✅ Found existing authentication cookies in browser profile`);
+          } else {
+            log(`ℹ️ No existing authentication cookies found - will use session token if provided`);
+          }
+        } catch (e: any) {
+          log(`Could not check existing cookies: ${e.message}`);
+        }
 
         // Set up streaming response capture BEFORE navigation using route
         log('Setting up streaming capture with route interception...');
@@ -431,6 +448,40 @@ export async function POST(request: NextRequest) {
             }
           }
         });
+
+        // Set up authentication if session token is provided
+        const sessionToken = process.env.CHATGPT_SESSION_TOKEN;
+        if (sessionToken) {
+          log('Setting up authentication with session token...');
+          try {
+            // First navigate to ChatGPT domain to set cookies properly
+            await currentPage.goto('https://chatgpt.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+            
+            // Set authentication cookies
+            await currentPage.context().addCookies([
+              {
+                name: '__Secure-next-auth.session-token',
+                value: sessionToken,
+                domain: '.chatgpt.com',
+                path: '/',
+                httpOnly: true,
+                secure: true,
+                sameSite: 'Lax'
+              }
+            ]);
+            log('✅ Authentication cookie set successfully');
+            
+            // Wait a moment for cookie to be applied
+            await currentPage.waitForTimeout(1000);
+          } catch (e: any) {
+            log(`Warning: Could not set authentication cookies: ${e.message}`);
+            log('Will proceed without session token - user may need to log in manually');
+          }
+        } else {
+          log('ℹ️ No CHATGPT_SESSION_TOKEN found in environment variables');
+          log('💡 Tip: Set CHATGPT_SESSION_TOKEN in Render environment variables to auto-authenticate');
+          log('   The browser profile will maintain your session after first login');
+        }
 
         // Navigate to ChatGPT with query
         const encodedQuery = encodeURIComponent(query || '');
