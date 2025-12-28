@@ -377,6 +377,17 @@ export default function BrowserFanoutTab() {
         const checkData: StepResponse = await checkResponse.json();
 
         if (!checkData.success) {
+          // Check if it's a session expiry
+          if (checkData.error?.includes('session expired') || checkData.error?.includes('Browser session expired')) {
+            addLog(`⚠️ Browser session expired (Browserless timeout)`);
+            addLog(`💡 Browserless free tier has a 30-second session limit.`);
+            addLog(`🔄 Please click "Auto Run" to start a new session.`);
+            setBrowserOpen(false);
+            setIsAutoRunning(false);
+            setIsLoading(false);
+            setCurrentStep('');
+            return;
+          }
           throw new Error(checkData.error || 'Failed to check response');
         }
 

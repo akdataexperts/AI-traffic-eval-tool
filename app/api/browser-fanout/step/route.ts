@@ -223,11 +223,14 @@ export async function POST(request: NextRequest) {
           
           try {
             // Connect to Browserless via CDP
-            const browserlessUrl = `wss://chrome.browserless.io?token=${browserlessToken}&stealth=true`;
-            log(`Connecting to Browserless...`);
+            // Free tier: 30 second session limit, Paid: up to 60000 seconds
+            // Use 30000ms (30s) for free tier compatibility
+            const sessionTimeout = 30000; // 30 seconds for free tier
+            const browserlessUrl = `wss://chrome.browserless.io?token=${browserlessToken}&stealth=true&timeout=${sessionTimeout}&blockAds=true`;
+            log(`Connecting to Browserless (stealth mode, ${sessionTimeout/1000}s session timeout)...`);
             
             browser = await chromium.connectOverCDP(browserlessUrl, {
-              timeout: 60000
+              timeout: 60000 // 1 minute connection timeout
             });
             
             log('✅ Connected to Browserless.io cloud browser');
@@ -628,8 +631,23 @@ export async function POST(request: NextRequest) {
 
         log('Checking for conversation ID in URL...');
 
-        // Check current URL for conversation ID
-        const currentUrl = currentPage.url();
+        // Check if browser connection is still alive
+        let currentUrl: string;
+        try {
+          currentUrl = currentPage.url();
+        } catch (e: any) {
+          log(`Browser connection lost: ${e.message}`);
+          // Reset state since browser is gone
+          browserContext = null;
+          currentPage = null;
+          browser = null;
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Browser session expired. Browserless free tier has a 30-second timeout. Please try again or upgrade your Browserless plan.',
+            sessionExpired: true
+          });
+        }
+        
         log(`Current URL: ${currentUrl}`);
 
         // Check if we're on login page
@@ -717,17 +735,27 @@ export async function POST(request: NextRequest) {
              const pageInfo = await currentPage.evaluate(() => {
                const url = window.location.href;
                const hasTextarea = !!document.querySelector('textarea, #prompt-textarea');
-               const hasLoginButton = !!document.querySelector('button:has-text("Log in"), a[href*="login"]');
+               // Check for login elements using valid CSS selectors
+               const hasLoginButton = !!(
+                 document.querySelector('a[href*="login"]') ||
+                 document.querySelector('button[data-testid*="login"]') ||
+                 Array.from(document.querySelectorAll('button')).some(b => b.textContent?.toLowerCase().includes('log in'))
+               );
                const hasSubmitButton = !!document.querySelector('button[data-testid="send-button"], button[aria-label*="Send"]');
                const submitButtonDisabled = document.querySelector('button[data-testid="send-button"]')?.hasAttribute('disabled');
+               
+               // Check page content for clues
+               const bodyText = document.body?.innerText?.substring(0, 500) || '';
+               const isLoginPage = bodyText.toLowerCase().includes('log in') || bodyText.toLowerCase().includes('sign up');
                
                return {
                  url,
                  hasTextarea,
-                 hasLoginButton,
+                 hasLoginButton: hasLoginButton || isLoginPage,
                  hasSubmitButton,
                  submitButtonDisabled,
-                 title: document.title
+                 title: document.title,
+                 bodyPreview: bodyText.substring(0, 200)
                };
              });
              
