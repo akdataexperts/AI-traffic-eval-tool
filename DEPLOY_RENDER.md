@@ -35,26 +35,27 @@ This guide will help you deploy the AI Traffic Eval Tool to Render, which suppor
 
 ## Browser Fanout Configuration (Recommended)
 
-The Browser Fanout feature works best with **Browserless.io** - a cloud browser service that avoids Cloudflare detection.
+The Browser Fanout feature works best with **Browserbase** - a cloud browser service that avoids Cloudflare detection.
 
-### Setting up Browserless.io
+### Setting up Browserbase
 
-1. **Sign up at [browserless.io](https://browserless.io)**
-   - Free tier: 1,000 browser sessions/month
-   - Paid plans available for more usage
+1. **Sign up at [browserbase.com](https://www.browserbase.com)**
+   - Sign up for an account
+   - Get your API key from the dashboard
 
-2. **Get your API token**
-   - Go to your Browserless dashboard
-   - Copy your API token
+2. **Get your API key**
+   - Go to your Browserbase dashboard
+   - Copy your API key
 
 3. **Add to Render environment variables**
-   - `BROWSERLESS_TOKEN` = your-browserless-api-token
+   - `BROWSERBASE_TOKEN` = your-browserbase-api-key
 
-### Benefits of Browserless.io
+### Benefits of Browserbase
 - ✅ **Stealth mode** - Avoids Cloudflare bot detection
 - ✅ **No local browser needed** - Works in any cloud environment
 - ✅ **Better IP reputation** - Less likely to be blocked
 - ✅ **Persistent sessions** - Can maintain login state
+- ✅ **Longer session limits** - Better than Browserless free tier
 
 ### Optional: ChatGPT Auto-Login
 To skip manual login every time:
